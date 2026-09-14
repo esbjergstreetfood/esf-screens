@@ -24,17 +24,6 @@
     object-fit: cover;
     display: block;
   }
-  /* TEMPORARY DIAGNOSTIC (remove once we've learned something): forces the
-     browser to skip any smoothing/interpolation when displaying the image.
-     If the image is genuinely a 1:1 pixel match for the screen, this changes
-     nothing. If the browser is quietly scaling it, this turns a smooth blur
-     into a visibly blocky/aliased look instead - proving scaling is
-     happening somewhere even before we've found the setting causing it. */
-  #media-container img {
-    image-rendering: pixelated;
-    image-rendering: -webkit-optimize-contrast;
-    image-rendering: crisp-edges;
-  }
 </style>
 </head>
 <body>
