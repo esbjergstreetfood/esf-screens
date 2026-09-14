@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kongensgade Screen 1 - Test</title>
+<title>Kongensgade Screen 1</title>
 <style>
   html, body {
     margin: 0;
@@ -13,7 +13,12 @@
     background: #000;
     overflow: hidden;
   }
-  video {
+  #media-container {
+    width: 100%;
+    height: 100%;
+  }
+  #media-container video,
+  #media-container img {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -22,27 +27,92 @@
 </style>
 </head>
 <body>
-  <video id="reel" src="https://github.com/esbjergstreetfood/kongensgade-screens/releases/download/v1-media/reel.mp4" autoplay muted loop playsinline></video>
+  <div id="media-container"></div>
+
   <script>
-    // Basic resilience for an unattended kiosk screen:
-    // if the video ever pauses or stalls, try to resume it automatically.
-    var video = document.getElementById('reel');
+    // ---- Config-driven display for Screen 1 ----
+    // Every CHECK_INTERVAL_MS, this page re-fetches config.json (with cache-busting)
+    // and swaps the on-screen media if (and only if) the config actually changed.
+    // To change what this screen shows: edit config.json in the repo. Nothing
+    // about this HTML file needs to change for a routine media swap.
 
-    video.addEventListener('pause', function () {
-      video.play().catch(function () {});
-    });
+    var CONFIG_URL = 'config.json';
+    var CHECK_INTERVAL_MS = 30000;
+    var current = null; // last-applied config, so we don't restart media needlessly
 
-    document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) {
+    function sameConfig(a, b) {
+      return !!a && !!b && a.type === b.type && a.src === b.src;
+    }
+
+    function renderVideo(src) {
+      var container = document.getElementById('media-container');
+      container.innerHTML = '';
+      var video = document.createElement('video');
+      video.src = src;
+      video.autoplay = true;
+      video.muted = true;
+      video.loop = true;
+      video.setAttribute('playsinline', '');
+
+      // Same resilience behaviour as the original test page.
+      video.addEventListener('pause', function () {
         video.play().catch(function () {});
+      });
+      video.addEventListener('error', function () {
+        setTimeout(function () { location.reload(); }, 10000);
+      });
+
+      container.appendChild(video);
+    }
+
+    function renderImage(src) {
+      var container = document.getElementById('media-container');
+      container.innerHTML = '';
+      var img = document.createElement('img');
+      img.src = src;
+      img.alt = '';
+      container.appendChild(img);
+    }
+
+    function applyConfig(config) {
+      if (!config || !config.type || !config.src) {
+        console.log('Ignoring invalid config:', config);
+        return;
+      }
+      if (sameConfig(config, current)) {
+        return; // No change — leave whatever is currently playing/showing alone.
+      }
+      current = config;
+      if (config.type === 'video') {
+        renderVideo(config.src);
+      } else if (config.type === 'image') {
+        renderImage(config.src);
+      } else {
+        console.log('Unknown media type:', config.type);
+      }
+    }
+
+    function checkConfig() {
+      fetch(CONFIG_URL + '?_=' + Date.now(), { cache: 'no-store' })
+        .then(function (res) { return res.json(); })
+        .then(applyConfig)
+        .catch(function (err) {
+          // Network hiccup or bad JSON: keep showing whatever's already on screen
+          // rather than blanking it.
+          console.log('config check failed', err);
+        });
+    }
+
+    // If the app/browser gets backgrounded and comes back, make sure video resumes.
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && current && current.type === 'video') {
+        var v = document.querySelector('#media-container video');
+        if (v) v.play().catch(function () {});
       }
     });
 
-    // If the video errors out entirely, try reloading the whole page
-    // after a short delay rather than leaving the screen stuck/black.
-    video.addEventListener('error', function () {
-      setTimeout(function () { location.reload(); }, 10000);
-    });
+    checkConfig();
+    setInterval(checkConfig, CHECK_INTERVAL_MS);
   </script>
 </body>
 </html>
