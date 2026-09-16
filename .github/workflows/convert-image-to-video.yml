@@ -75,4 +75,3 @@ jobs:
           git add "config-${SCREEN}.json"
           git commit -m "Auto-convert Screen ${SCREEN} image to video" || echo "Nothing to commit"
           git push
-.github/workflows/convert-image-to-video.yml
