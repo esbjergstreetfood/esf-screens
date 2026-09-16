@@ -40,7 +40,12 @@ jobs:
           curl -fL "${{ steps.inputs.outputs.image_url }}" -o source-image
           file source-image
 
-      - name: Convert to video (ffmpeg ships preinstalled on this runner)
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Convert to video
         run: |
           ffmpeg -y -loop 1 -i source-image \
             -c:v libx264 -t 8 -pix_fmt yuv420p \
