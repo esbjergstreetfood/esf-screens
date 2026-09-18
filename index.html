@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Esbjerg Street Food — Screen</title>
+<title>ESF Screens</title>
 <style>
   html, body {
     margin: 0;
@@ -56,15 +56,16 @@
   <div id="setup-message">
     <h1>No screen specified</h1>
     <p>This page needs a screen slug in the URL, for example:</p>
-    <p><code>index.html?screen=kongensgade-1</code></p>
-    <p>Slugs are listed in WordPress under <strong>Kongensgade Screens → Screens</strong>.</p>
+    <p><code>?s=kongensgade-1</code></p>
+    <p>The exact URL for each screen is listed in WordPress under <strong>ESF Screens → Settings</strong>.</p>
   </div>
 
   <script>
     // ---- Generic config-driven kiosk page -------------------------------
     // One page for every screen, replacing the old index-1.html … index-4.html.
-    // The screen is chosen by the URL: index.html?screen=<slug>, and the page
-    // polls config-<slug>.json for what to display.
+    // The screen is chosen by the URL — ?s=<slug>, or the longer
+    // ?screen=<slug> — and the page polls config-<slug>.json for what to
+    // display.
     //
     // Every CHECK_INTERVAL_MS it re-fetches that config (cache-busted) and
     // swaps the on-screen media if — and only if — the config actually
@@ -77,10 +78,17 @@
     var CHECK_INTERVAL_MS = 30000;
     var current = null; // last-applied config, so we don't restart media needlessly
 
-    // Read ?screen=<slug> from the URL. Anything that isn't a plain
-    // lowercase slug is rejected rather than used to build a fetch path.
+    // Read the screen slug from the URL. Both ?s=<slug> and the longer
+    // ?screen=<slug> work; ?s= is what goes on the TVs, because the URL
+    // gets typed on a d-pad remote and every character is a chore.
+    // Anything that isn't a plain lowercase slug is rejected rather than
+    // used to build a fetch path.
     function getScreenSlug() {
-      var match = /[?&]screen=([^&#]*)/.exec(window.location.search);
+      // Case-insensitive on the parameter NAME as well as the value: a TV
+      // remote's on-screen keyboard often starts in caps, and "?S=" failing
+      // silently to a blank screen is a miserable thing to debug on a ladder.
+      var match = /[?&]s=([^&#]*)/i.exec(window.location.search)
+               || /[?&]screen=([^&#]*)/i.exec(window.location.search);
       if (!match) return null;
       var slug = decodeURIComponent(match[1]).trim().toLowerCase();
       return /^[a-z0-9][a-z0-9-]*$/.test(slug) ? slug : null;
