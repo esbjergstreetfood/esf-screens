@@ -25,9 +25,15 @@
     display: block;
   }
   /* Only ever seen by a person opening this page wrong in a browser —
-     a TV pointed at a correct URL never renders this. */
+     a TV pointed at a correct URL never renders this.
+     Positioned fixed and over the top of everything: #media-container is
+     height:100% and body is overflow:hidden, so an in-flow message would
+     be laid out below the fold and be unreachable — i.e. a black screen. */
   #setup-message {
     display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
     box-sizing: border-box;
     width: 100%;
     height: 100%;
