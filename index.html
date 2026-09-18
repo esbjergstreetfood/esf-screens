@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kongensgade Screen 1</title>
+<title>Esbjerg Street Food — Screen</title>
 <style>
   html, body {
     margin: 0;
@@ -24,21 +24,68 @@
     object-fit: cover;
     display: block;
   }
+  /* Only ever seen by a person opening this page wrong in a browser —
+     a TV pointed at a correct URL never renders this. */
+  #setup-message {
+    display: none;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 6vh 6vw;
+    color: #e4e4e7;
+    background: #000;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #setup-message h1 { font-size: 22px; margin: 0 0 12px; }
+  #setup-message code {
+    background: #18181b;
+    border-radius: 4px;
+    padding: 2px 6px;
+    overflow-wrap: anywhere;
+  }
 </style>
 </head>
 <body>
   <div id="media-container"></div>
+  <div id="setup-message">
+    <h1>No screen specified</h1>
+    <p>This page needs a screen slug in the URL, for example:</p>
+    <p><code>index.html?screen=kongensgade-1</code></p>
+    <p>Slugs are listed in WordPress under <strong>Kongensgade Screens → Screens</strong>.</p>
+  </div>
 
   <script>
-    // ---- Config-driven display for Screen 1 ----
-    // Every CHECK_INTERVAL_MS, this page re-fetches config.json (with cache-busting)
-    // and swaps the on-screen media if (and only if) the config actually changed.
-    // To change what this screen shows: edit config.json in the repo. Nothing
-    // about this HTML file needs to change for a routine media swap.
+    // ---- Generic config-driven kiosk page -------------------------------
+    // One page for every screen, replacing the old index-1.html … index-4.html.
+    // The screen is chosen by the URL: index.html?screen=<slug>, and the page
+    // polls config-<slug>.json for what to display.
+    //
+    // Every CHECK_INTERVAL_MS it re-fetches that config (cache-busted) and
+    // swaps the on-screen media if — and only if — the config actually
+    // changed, so a poll that returns the same thing never restarts a video.
+    //
+    // To change what a screen shows: use the WordPress control panel, which
+    // writes the config file. Nothing about this HTML file needs to change,
+    // and nothing about it is specific to any one screen.
 
-    var CONFIG_URL = 'config.json';
     var CHECK_INTERVAL_MS = 30000;
     var current = null; // last-applied config, so we don't restart media needlessly
+
+    // Read ?screen=<slug> from the URL. Anything that isn't a plain
+    // lowercase slug is rejected rather than used to build a fetch path.
+    function getScreenSlug() {
+      var match = /[?&]screen=([^&#]*)/.exec(window.location.search);
+      if (!match) return null;
+      var slug = decodeURIComponent(match[1]).trim().toLowerCase();
+      return /^[a-z0-9][a-z0-9-]*$/.test(slug) ? slug : null;
+    }
+
+    var SCREEN = getScreenSlug();
+    var CONFIG_URL = SCREEN ? 'config-' + SCREEN + '.json' : null;
+
+    if (SCREEN) {
+      document.title = 'Screen: ' + SCREEN;
+    }
 
     function sameConfig(a, b) {
       return !!a && !!b && a.type === b.type && a.src === b.src;
@@ -54,7 +101,7 @@
       video.loop = true;
       video.setAttribute('playsinline', '');
 
-      // Same resilience behaviour as the original test page.
+      // Same resilience behaviour as the per-screen pages this replaces.
       video.addEventListener('pause', function () {
         video.play().catch(function () {});
       });
@@ -97,8 +144,8 @@
         .then(function (res) { return res.json(); })
         .then(applyConfig)
         .catch(function (err) {
-          // Network hiccup or bad JSON: keep showing whatever's already on screen
-          // rather than blanking it.
+          // Network hiccup or bad JSON: keep showing whatever's already on
+          // screen rather than blanking it.
           console.log('config check failed', err);
         });
     }
@@ -111,8 +158,14 @@
       }
     });
 
-    checkConfig();
-    setInterval(checkConfig, CHECK_INTERVAL_MS);
+    if (!SCREEN) {
+      // No usable slug: show the setup note instead of polling a path that
+      // can't exist. A TV is never in this state — only a person testing.
+      document.getElementById('setup-message').style.display = 'block';
+    } else {
+      checkConfig();
+      setInterval(checkConfig, CHECK_INTERVAL_MS);
+    }
   </script>
 </body>
 </html>
