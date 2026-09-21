@@ -21,6 +21,10 @@
   #media-container img {
     width: 100%;
     height: 100%;
+    /* Default only. The config's optional "fit" field overrides this per
+       screen: cover fills and crops, contain shows everything with bars.
+       Kept as the default so a config written before that field existed
+       renders exactly as it always did. */
     object-fit: cover;
     display: block;
   }
@@ -175,7 +179,17 @@
     }
 
     function sameConfig(a, b) {
-      return !!a && !!b && a.type === b.type && a.src === b.src;
+      return !!a && !!b && a.type === b.type && a.src === b.src && a.fit === b.fit;
+    }
+
+    // "fit" says how the media should sit in the screen: cover fills it and
+    // crops the overflow, contain shows all of it inside black bars. Only
+    // those two values are honoured; anything else (or nothing at all, as in
+    // every config written before v6.1.0) falls back to cover, which is how
+    // this page behaved from the start.
+    function applyFit(el) {
+      var fit = current && current.fit;
+      el.style.objectFit = (fit === 'contain') ? 'contain' : 'cover';
     }
 
     function renderVideo(src) {
@@ -202,6 +216,7 @@
         });
       }
 
+      applyFit(video);
       container.appendChild(video);
     }
 
@@ -216,6 +231,7 @@
           noteMediaSize(img.naturalWidth, img.naturalHeight, 'image');
         });
       }
+      applyFit(img);
       container.appendChild(img);
     }
 
