@@ -49,6 +49,28 @@
     padding: 2px 6px;
     overflow-wrap: anywhere;
   }
+  /* Diagnostic overlay, shown only with &debug=1 in the URL. Sized to be
+     readable from across a room on a TV, and positioned fixed so it sits
+     over the media rather than being pushed below the fold. */
+  #debug-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    max-width: 96%;
+    margin: 2%;
+    padding: 18px 22px;
+    background: rgba(0, 0, 0, 0.82);
+    border: 2px solid #22d3ee;
+    border-radius: 10px;
+    color: #f4f4f5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 26px;
+    line-height: 1.5;
+    white-space: pre;
+    z-index: 999;
+  }
+  #debug-overlay b { color: #22d3ee; }
 </style>
 </head>
 <body>
@@ -59,6 +81,7 @@
     <p><code>?s=kongensgade-1</code></p>
     <p>The exact URL for each screen is listed in WordPress under <strong>ESF Screens → Settings</strong>.</p>
   </div>
+  <div id="debug-overlay"></div>
 
   <script>
     // ---- Generic config-driven kiosk page -------------------------------
@@ -97,6 +120,56 @@
     var SCREEN = getScreenSlug();
     var CONFIG_URL = SCREEN ? 'config-' + SCREEN + '.json' : null;
 
+    // ---- Diagnostic overlay (&debug=1) ---------------------------------
+    // Answers questions that can only be answered on the actual hardware:
+    // what resolution the kiosk browser is really drawing at, whether the
+    // TV's rotate feature rotates the browser viewport or only the output
+    // signal, and how the media's shape compares to the viewport's. Off
+    // unless explicitly asked for, so a normal screen never shows it.
+    var DEBUG = /[?&]debug=1/i.test(window.location.search);
+    var lastMediaSize = null; // {w, h, kind} once the media reports its size
+
+    function ratio(w, h) {
+      if (!w || !h) return '?';
+      return (w / h).toFixed(3) + (w >= h ? '  (landscape)' : '  (portrait)');
+    }
+
+    function updateDebug() {
+      if (!DEBUG) return;
+      var el = document.getElementById('debug-overlay');
+      var vw = window.innerWidth;
+      var vh = window.innerHeight;
+      var dpr = window.devicePixelRatio || 1;
+      var o = (screen.orientation && screen.orientation.type) || '(not reported)';
+
+      var lines = [
+        '<b>screen</b>       ' + (SCREEN || '(none)'),
+        '<b>viewport</b>     ' + vw + ' x ' + vh + '  CSS px',
+        '<b>ratio</b>        ' + ratio(vw, vh),
+        '<b>pixel ratio</b>  ' + dpr,
+        '<b>drawn at</b>     ' + Math.round(vw * dpr) + ' x ' + Math.round(vh * dpr) + '  device px',
+        '<b>screen obj</b>   ' + screen.width + ' x ' + screen.height,
+        '<b>orientation</b>  ' + o,
+      ];
+
+      if (lastMediaSize) {
+        lines.push('<b>media</b>        ' + lastMediaSize.w + ' x ' + lastMediaSize.h + '  (' + lastMediaSize.kind + ')');
+        lines.push('<b>media ratio</b>  ' + ratio(lastMediaSize.w, lastMediaSize.h));
+        var mismatch = Math.abs((vw / vh) - (lastMediaSize.w / lastMediaSize.h)) > 0.15;
+        lines.push('<b>shape match</b>  ' + (mismatch ? 'NO - media is being cropped' : 'yes'));
+      } else {
+        lines.push('<b>media</b>        (waiting for it to load)');
+      }
+
+      el.innerHTML = lines.join('\n');
+      el.style.display = 'block';
+    }
+
+    function noteMediaSize(w, h, kind) {
+      lastMediaSize = { w: w, h: h, kind: kind };
+      updateDebug();
+    }
+
     if (SCREEN) {
       document.title = 'Screen: ' + SCREEN;
     }
@@ -123,6 +196,12 @@
         setTimeout(function () { location.reload(); }, 10000);
       });
 
+      if (DEBUG) {
+        video.addEventListener('loadedmetadata', function () {
+          noteMediaSize(video.videoWidth, video.videoHeight, 'video');
+        });
+      }
+
       container.appendChild(video);
     }
 
@@ -132,6 +211,11 @@
       var img = document.createElement('img');
       img.src = src;
       img.alt = '';
+      if (DEBUG) {
+        img.addEventListener('load', function () {
+          noteMediaSize(img.naturalWidth, img.naturalHeight, 'image');
+        });
+      }
       container.appendChild(img);
     }
 
@@ -171,6 +255,14 @@
         if (v) v.play().catch(function () {});
       }
     });
+
+    if (DEBUG) {
+      updateDebug();
+      window.addEventListener('resize', updateDebug);
+      if (screen.orientation && screen.orientation.addEventListener) {
+        screen.orientation.addEventListener('change', updateDebug);
+      }
+    }
 
     if (!SCREEN) {
       // No usable slug: show the setup note instead of polling a path that
