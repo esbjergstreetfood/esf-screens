@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESF screen sharpness test</title>
+<style>
+  html,body{margin:0;padding:0;background:#fff;color:#000;
+    font-family:-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;}
+  body{padding:16px 20px 40px;}
+  h1{font-size:28px;margin:0 0 6px;}
+  .meta{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;
+    line-height:1.45;background:#111;color:#0f0;padding:10px 12px;margin:0 0 18px;
+    white-space:pre;}
+  h2{font-size:20px;margin:22px 0 6px;padding-top:10px;border-top:2px solid #000;}
+  .note{font-size:13px;color:#555;margin:0 0 8px;}
+  canvas,img{display:block;image-rendering:auto;}
+  .grating{margin-bottom:10px;}
+  .glab{font-family:ui-monospace,monospace;font-size:13px;margin:0 0 2px;}
+  .sample{margin:0 0 4px;}
+  .s18{font-size:18px} .s24{font-size:24px} .s36{font-size:36px} .s60{font-size:60px;font-weight:700}
+  .band{border:1px solid #ccc;padding:8px;margin-bottom:6px;}
+  .tag{font-family:ui-monospace,monospace;font-size:13px;color:#b00;font-weight:700;margin:0 0 4px;}
+</style>
+</head>
+<body>
+
+<h1>ESF sharpness test</h1>
+<div class="meta" id="meta">measuring…</div>
+
+<h2>1 — Line gratings</h2>
+<p class="note">Vertical stripes drawn at exact device-pixel widths. Photograph these close up.
+If the 1&nbsp;px grating shows as clean alternating lines, the page really is rasterising at
+device resolution. If it shows as flat grey, moiré, or uneven banding, it is being scaled.</p>
+<div id="gratings"></div>
+
+<h2>2 — The same text, three ways</h2>
+<p class="note">Identical string, identical size, three different paths to the panel.
+Compare them against each other, not against memory.</p>
+
+<div class="band">
+  <div class="tag">A · HTML TEXT (browser rasterises the glyphs)</div>
+  <div class="sample s60" id="a60">Margherita DKK 89,-</div>
+  <div class="sample s36">Quattro Formaggi · San Marzano tomato sauce</div>
+  <div class="sample s24">Mascarpone, portobello mushrooms, mozzarella, artichoke hearts &amp; parmesan</div>
+  <div class="sample s18">Homemade white sauce, parmesan &amp; slow-cooked homemade beef ragu</div>
+</div>
+
+<div class="band">
+  <div class="tag">B · CANVAS TEXT (drawn at devicePixelRatio)</div>
+  <canvas id="cvB"></canvas>
+</div>
+
+<div class="band">
+  <div class="tag">C · IMAGE (same canvas, exported to PNG, shown as &lt;img&gt;)</div>
+  <img id="imgC" alt="">
+</div>
+
+<h2>3 — Hairlines</h2>
+<p class="note">One-device-pixel rules at increasing spacing. Any that vanish, double up,
+or vary in weight mean the surface is being resampled.</p>
+<canvas id="cvH"></canvas>
+
+<script>
+(function(){
+  var dpr = window.devicePixelRatio || 1;
+  var vw = document.documentElement.clientWidth;
+  var vh = document.documentElement.clientHeight;
+
+  document.getElementById('meta').textContent =
+    'viewport    ' + vw + ' x ' + vh + ' CSS px\n' +
+    'pixel ratio ' + dpr + '\n' +
+    'implies     ' + Math.round(vw*dpr) + ' x ' + Math.round(vh*dpr) + ' device px\n' +
+    'screen obj  ' + screen.width + ' x ' + screen.height + ' (x dpr = ' +
+                      Math.round(screen.width*dpr) + ' x ' + Math.round(screen.height*dpr) + ')\n' +
+    'orientation ' + ((screen.orientation && screen.orientation.type) || 'n/a') + '\n' +
+    'UA          ' + navigator.userAgent.slice(0,90);
+
+  function makeCanvas(parent, cssW, cssH){
+    var c = document.createElement('canvas');
+    c.width  = Math.round(cssW * dpr);
+    c.height = Math.round(cssH * dpr);
+    c.style.width  = cssW + 'px';
+    c.style.height = cssH + 'px';
+    parent.appendChild(c);
+    return c;
+  }
+
+  // ---- gratings ----
+  var gwrap = document.getElementById('gratings');
+  var cssW = Math.min(vw - 40, 1000);
+  [1,2,3,4].forEach(function(period){
+    var d = document.createElement('div');
+    d.className = 'grating';
+    var lab = document.createElement('div');
+    lab.className = 'glab';
+    lab.textContent = period + ' device px stripes';
+    d.appendChild(lab);
+    gwrap.appendChild(d);
+    var c = makeCanvas(d, cssW, 56);
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,c.width,c.height);
+    ctx.fillStyle = '#000';
+    for (var x = 0; x < c.width; x += period*2) ctx.fillRect(x, 0, period, c.height);
+  });
+
+  // ---- text B (canvas) and C (image) ----
+  var lines = [
+    ['700 60px -apple-system, Roboto, Arial, sans-serif', 'Margherita DKK 89,-'],
+    ['400 36px -apple-system, Roboto, Arial, sans-serif', 'Quattro Formaggi · San Marzano tomato sauce'],
+    ['400 24px -apple-system, Roboto, Arial, sans-serif', 'Mascarpone, portobello mushrooms, mozzarella, artichoke hearts & parmesan'],
+    ['400 18px -apple-system, Roboto, Arial, sans-serif', 'Homemade white sauce, parmesan & slow-cooked homemade beef ragu']
+  ];
+  var textH = 200;
+  var cB = document.getElementById('cvB');
+  cB.width = Math.round(cssW*dpr); cB.height = Math.round(textH*dpr);
+  cB.style.width = cssW+'px'; cB.style.height = textH+'px';
+  var bx = cB.getContext('2d');
+  bx.setTransform(dpr,0,0,dpr,0,0);
+  bx.fillStyle='#fff'; bx.fillRect(0,0,cssW,textH);
+  bx.fillStyle='#000'; bx.textBaseline='top';
+  var y = 4;
+  lines.forEach(function(l){ bx.font = l[0]; bx.fillText(l[1], 2, y); y += parseInt(l[0].split(' ')[1]) * 1.28; });
+
+  try {
+    document.getElementById('imgC').src = cB.toDataURL('image/png');
+    var im = document.getElementById('imgC');
+    im.style.width = cssW + 'px';
+    im.style.height = textH + 'px';
+  } catch(e){
+    document.getElementById('imgC').outerHTML = '<div style="color:#b00">canvas export blocked: '+e+'</div>';
+  }
+
+  // ---- hairlines ----
+  var cH = document.getElementById('cvH');
+  cH.width = Math.round(cssW*dpr); cH.height = Math.round(120*dpr);
+  cH.style.width = cssW+'px'; cH.style.height = '120px';
+  var hx = cH.getContext('2d');
+  hx.fillStyle='#fff'; hx.fillRect(0,0,cH.width,cH.height);
+  hx.fillStyle='#000';
+  var yy = 0, gap = 2;
+  while (yy < cH.height) { hx.fillRect(0, yy, cH.width, 1); gap += 1; yy += gap; }
+})();
+</script>
+</body>
+</html>
