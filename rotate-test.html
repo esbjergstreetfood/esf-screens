@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESF rotate test</title>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: #000; overflow: hidden;
+  }
+  #stage { width: 100%; height: 100%; position: relative; }
+
+  /* Unrotated: the control case. Video fills the viewport directly. */
+  #stage.rot0 video {
+    width: 100%; height: 100%;
+    object-fit: cover; display: block;
+  }
+
+  /* Rotated: the case under test.
+     The element is laid out LANDSCAPE (100vh wide x 100vw tall), which on a
+     1080x1920 portrait viewport means 1920x1080 -- matching the video's own
+     shape exactly, so object-fit has nothing to letterbox or crop. It is then
+     rotated about its centre, which lands it filling the portrait viewport.
+     Storing the picture sideways and rotating here is what lets the TV's
+     decoder see a landscape stream, which is the only kind it renders. */
+  #stage.rot90 video {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 100vh; height: 100vw;
+    object-fit: cover; display: block;
+    transform: translate(-50%, -50%) rotate(-90deg);
+    transform-origin: center center;
+  }
+
+  #hud {
+    position: fixed; top: 0; left: 0;
+    max-width: 96%; margin: 2%; padding: 18px 22px;
+    background: rgba(0,0,0,.82);
+    border: 2px solid #22d3ee; border-radius: 10px;
+    color: #f4f4f5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 26px; line-height: 1.5; white-space: pre;
+    z-index: 999;
+  }
+  #hud b { color: #22d3ee; }
+</style>
+</head>
+<body>
+<div id="stage"><video id="v" autoplay muted loop playsinline></video></div>
+<div id="hud">loading…</div>
+<script>
+(function () {
+  var q      = new URLSearchParams(location.search);
+  var src    = q.get('v');
+  var rot    = q.get('rot') === '0' ? 0 : 90;   // default: test the rotated case
+  var stage  = document.getElementById('stage');
+  var video  = document.getElementById('v');
+  var hud    = document.getElementById('hud');
+
+  if (!src) {
+    hud.textContent = 'Add ?v=<url-to-video>  (and optionally &rot=0 for the control)';
+    return;
+  }
+
+  stage.className = rot === 90 ? 'rot90' : 'rot0';
+  video.src = src;
+
+  // Progress is compared as a DIFFERENCE, never as "greater than": a looping
+  // video resets currentTime to zero every cycle, so a naive comparison
+  // reports a stall once per loop on a perfectly healthy screen.
+  var last = 0, lastSeen = Date.now(), stalled = false;
+  setInterval(function () {
+    var now = video.currentTime;
+    if (Math.abs(now - last) > 0.05) { last = now; lastSeen = Date.now(); stalled = false; }
+    else if (Date.now() - lastSeen > 3000) { stalled = true; }
+    draw();
+  }, 1000);
+
+  function draw() {
+    hud.innerHTML =
+      '<b>mode</b>        rot' + rot + (rot === 90 ? '  (sideways file, rotated here)' : '  (control, no rotation)') + '\n' +
+      '<b>viewport</b>    ' + innerWidth + ' x ' + innerHeight + ' CSS px\n' +
+      '<b>pixel ratio</b> ' + (devicePixelRatio || 1) + '\n' +
+      '<b>video says</b>  ' + video.videoWidth + ' x ' + video.videoHeight + '\n' +
+      '<b>shape</b>       ' + (video.videoWidth > video.videoHeight ? 'landscape' : 'portrait') + '\n' +
+      '<b>playback</b>    ' + (stalled ? 'STALLED' : video.currentTime.toFixed(1) + 's');
+  }
+
+  video.addEventListener('loadedmetadata', draw);
+  video.addEventListener('error', function () {
+    hud.textContent = 'video error: ' + (video.error && video.error.code);
+  });
+  draw();
+})();
+</script>
+</body>
+</html>
