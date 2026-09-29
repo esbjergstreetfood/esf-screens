@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESF video size test</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;color:#e4e4e7;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:clamp(15px,1.2vw,24px);line-height:1.5;}
+  .wrap{padding:3vh 3vw;}
+  h1{font-size:1.5em;margin:0 0 .2em}
+  h2{font-size:1.05em;margin:1em 0 .3em;color:#22d3ee;border-bottom:1px solid #27272a;padding-bottom:.2em}
+  .verdict{font-size:1.25em;padding:.5em .7em;border-radius:8px;margin:.6em 0 1em;background:#18181b;border:2px solid #52525b}
+  .ok{color:#4ade80}.bad{color:#f87171}.warn{color:#fbbf24}.dim{color:#a1a1aa}
+  table{border-collapse:collapse;width:100%}
+  th{text-align:left;color:#71717a;font-weight:normal;padding:.2em 1em .2em 0}
+  td{padding:.2em 1em .2em 0;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ESF video size test</h1>
+  <div class="dim">Identical encoding throughout (H.264 Main 4.0, 1920x1080, 30fps, faststart). Only the file size changes.<br>
+  Upload the clips to the <b>WordPress media library</b> (GitHub's uploader refuses anything this big). Anything also present in this repo is tested as a host comparison; missing ones are skipped.</div>
+  <div class="verdict" id="verdict">Running — this takes three to four minutes. Leave it.</div>
+  <table><thead><tr><th>size</th><th>this site (GitHub)</th><th>WordPress</th></tr></thead><tbody id="tb"></tbody></table>
+  <h2>Your real Sal bar file</h2>
+  <table><tbody id="rb"></tbody></table>
+  <div class="dim" id="note" style="margin-top:1em"></div>
+</div>
+<script>
+var CLIPS=[['size_01mb.mp4','1 MB'],['size_06mb.mp4','6 MB'],['size_12mb.mp4','12 MB'],['size_24mb.mp4','23 MB'],['size_43mb.mp4','43 MB']];
+var ERRS={1:'ABORTED',2:'NETWORK',3:'DECODE',4:'NOT_SUPPORTED'};
+
+function probe(src){
+  return new Promise(function(resolve){
+    var v=document.createElement('video');
+    v.muted=true; v.defaultMuted=true; v.loop=true; v.preload='auto';
+    v.setAttribute('muted','');v.setAttribute('playsinline','');v.setAttribute('webkit-playsinline','');
+    v.style.cssText='position:fixed;left:-9999px;width:120px;height:120px;';
+    document.body.appendChild(v);
+    var r={ok:false,err:null,ms:null},t0=Date.now(),last=null,tries=0,timer;
+    v.addEventListener('error',function(){ r.err=v.error?(ERRS[v.error.code]||v.error.code):'unknown'; });
+    v.src=src; v.load();
+    setTimeout(function(){var p=v.play(); if(p&&p.catch)p.catch(function(e){ r.playErr=(e&&e.name)||String(e); });},200);
+    function fin(){clearInterval(timer);v.removeAttribute('src');v.load();v.remove();resolve(r);}
+    timer=setInterval(function(){
+      tries++;
+      var t=v.currentTime;
+      // difference, not ">": clips loop, so a healthy one wraps back to zero
+      if(last!==null&&Math.abs(t-last)>0.02){r.ok=true;r.ms=Date.now()-t0;return fin();}
+      last=t;
+      if(r.err&&tries>3) return fin();
+      if(tries>24) return fin();   // 12s
+    },500);
+  });
+}
+function exists(url){ // same-origin only; cross-origin HEAD is blocked by CORS
+  return fetch(url,{method:'HEAD',cache:'no-store'}).then(function(r){return r.ok;}).catch(function(){return false;});
+}
+function cell(r,missing){
+  if(missing) return 'not uploaded';
+  return r.ok ? ('PLAYS  '+r.ms+'ms') : ('FAILED  '+(r.err||'never started'));
+}
+function addRow(cells,classes){
+  var tr=document.createElement('tr');
+  cells.forEach(function(c,i){var td=document.createElement('td');td.textContent=c;if(classes&&classes[i])td.className=classes[i];tr.appendChild(td);});
+  document.getElementById('tb').appendChild(tr);
+}
+function cls(r,missing){ return missing?'dim':(r.ok?'ok':'bad'); }
+
+(function(){
+  var wpBase=null, res=[];
+  fetch('config-sal-bar.json?_='+Date.now(),{cache:'no-store'})
+    .then(function(r){return r.json();})
+    .then(function(cfg){ if(cfg&&cfg.src){ wpBase=cfg.src.substring(0,cfg.src.lastIndexOf('/')+1); } return cfg; })
+    .catch(function(){ return null; })
+    .then(function(cfg){
+      document.getElementById('note').textContent = wpBase ? ('WordPress base: '+wpBase) : 'Could not read config-sal-bar.json, so the WordPress column was skipped.';
+      var i=0;
+      (function next(){
+        if(i>=CLIPS.length) return finish(cfg);
+        var name=CLIPS[i][0], label=CLIPS[i][1];
+        exists(name).then(function(here){
+          var pHere = here ? probe(name) : Promise.resolve({ok:false});
+          return pHere.then(function(rh){
+            var pWp = wpBase ? probe(wpBase+name) : Promise.resolve({ok:false,err:'no base'});
+            return pWp.then(function(rw){
+              res.push({label:label,here:here?rh:null,wp:wpBase?rw:null});
+              addRow([label, cell(rh,!here), cell(rw,!wpBase)],
+                     ['', cls(rh,!here), cls(rw,!wpBase)]);
+              i++; next();
+            });
+          });
+        });
+      })();
+    });
+
+  function finish(cfg){
+    var rb=document.getElementById('rb');
+    function row(a,b,c){var tr=document.createElement('tr');[a,b].forEach(function(x){var td=document.createElement('td');td.textContent=x;if(c)td.className=c;tr.appendChild(td);});rb.appendChild(tr);}
+    var after=function(){
+      var el=document.getElementById('verdict'),msg,c;
+      var tested=res.filter(function(x){return x.here;});
+      var passed=tested.filter(function(x){return x.here.ok;});
+      var failed=tested.filter(function(x){return !x.here.ok;});
+      var wpTested=res.filter(function(x){return x.wp && x.wp.err!=='no base';});
+      var wpPassed=wpTested.filter(function(x){return x.wp.ok;});
+      var wpFailed=wpTested.filter(function(x){return !x.wp.ok;});
+      if(failed.length&&passed.length){ msg='SIZE IS THE LIMIT on this site. Largest that played: '+passed[passed.length-1].label+'. First that failed: '+failed[0].label+'.'; c='bad'; }
+      else if(wpFailed.length&&wpPassed.length){ msg='SIZE IS THE LIMIT on WordPress. Largest that played: '+wpPassed[wpPassed.length-1].label+'. First that failed: '+wpFailed[0].label+'.'; c='bad'; }
+      else if(wpTested.length&&wpFailed.length===wpTested.length&&passed.length===tested.length&&tested.length){ msg='THE HOST IS THE PROBLEM, NOT THE SIZE. Every clip played from this site; none played from WordPress, even the 1 MB one.'; c='bad'; }
+      else if(passed.length&&passed.length===tested.length){ msg='No size ceiling found, all the way to 43 MB. Size is not the limit — whatever broke your real file is something else.'; c='warn'; }
+      else { msg='Inconclusive — read the table.'; c='warn'; }
+      el.textContent=msg; el.className='verdict '+c;
+    };
+    if(cfg&&cfg.src){
+      row('file',(cfg.src||'').split('/').pop());
+      probe(cfg.src).then(function(r){ row('result', r.ok?('PLAYS after '+r.ms+'ms'):('FAILED  '+(r.err||'never started')), r.ok?'ok':'bad'); after(); });
+    } else { row('config','could not read config-sal-bar.json','warn'); after(); }
+  }
+})();
+</script>
