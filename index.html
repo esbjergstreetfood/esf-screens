@@ -28,12 +28,14 @@
     object-fit: cover;
     display: block;
   }
-  /* Only ever seen by a person opening this page wrong in a browser —
-     a TV pointed at a correct URL never renders this.
+  /* Only ever seen by a person opening this page wrong in a browser, or by
+     a screen that has been registered but never given media —
+     a TV pointed at a correct, saved screen never renders these.
      Positioned fixed and over the top of everything: #media-container is
      height:100% and body is overflow:hidden, so an in-flow message would
      be laid out below the fold and be unreachable — i.e. a black screen. */
-  #setup-message {
+  #setup-message,
+  #waiting-message {
     display: none;
     position: fixed;
     top: 0;
@@ -46,8 +48,10 @@
     background: #000;
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
-  #setup-message h1 { font-size: 22px; margin: 0 0 12px; }
-  #setup-message code {
+  #setup-message h1,
+  #waiting-message h1 { font-size: 22px; margin: 0 0 12px; }
+  #setup-message code,
+  #waiting-message code {
     background: #18181b;
     border-radius: 4px;
     padding: 2px 6px;
@@ -85,6 +89,12 @@
     <p><code>?s=kongensgade-1</code></p>
     <p>The exact URL for each screen is listed in WordPress under <strong>ESF Screens → Settings</strong>.</p>
   </div>
+  <div id="waiting-message">
+    <h1>Screen registered — no media yet</h1>
+    <p>This screen's URL is correct, but nothing has been chosen for it to show.</p>
+    <p>Open the screens dashboard in WordPress, find <code id="waiting-slug"></code>, and pick media for it.</p>
+    <p>It appears here within about a minute of being saved; no need to touch this TV again.</p>
+  </div>
   <div id="debug-overlay"></div>
 
   <script>
@@ -104,6 +114,29 @@
 
     var CHECK_INTERVAL_MS = 30000;
     var current = null; // last-applied config, so we don't restart media needlessly
+
+    // ---- Where this page reports its health (v6.3.0) --------------------
+    // WordPress lives on a different host from the kiosk, so this is the one
+    // place in the page that knows about the other half of the system.
+    // Change it here if the site ever moves. Set it to '' to turn reporting
+    // off entirely — the page displays exactly the same either way.
+    var HEARTBEAT_URL = 'https://intranet.esbjergstreetfood.com/wp-json/esf-screens/v1/heartbeat';
+    var HEARTBEAT_INTERVAL_MS = 60000;   // deliberately slower than the config poll
+    var FIRST_HEARTBEAT_MS = 5000;       // report in promptly after a reload
+
+    // ---- Nightly recycle (v6.3.0) ---------------------------------------
+    // Screenlite can get its video decoder stuck after long uptime: the
+    // picture freezes while the page stays alive and keeps polling. A reload
+    // clears it. This is the blunt mitigation; the heartbeat above is what
+    // makes the freeze visible in the first place.
+    var RELOAD_HOUR = 4;                 // local time on the TV
+    var MAX_UPTIME_HOURS = 26;           // backstop for a TV whose clock is wrong
+    var MIN_UPTIME_BEFORE_RELOAD_MS = 2 * 60 * 60 * 1000;
+
+    var LOADED_AT = Date.now();
+    var errorCount = 0;                  // media errors + failed config fetches
+    var lastVideoTime = null;            // for detecting a stalled decoder
+    var lastBeat = '(none yet)';
 
     // Read the screen slug from the URL. Both ?s=<slug> and the longer
     // ?screen=<slug> work; ?s= is what goes on the TVs, because the URL
@@ -165,6 +198,10 @@
         lines.push('<b>media</b>        (waiting for it to load)');
       }
 
+      lines.push('<b>uptime</b>       ' + Math.round((Date.now() - LOADED_AT) / 60000) + ' min');
+      lines.push('<b>errors</b>       ' + errorCount);
+      lines.push('<b>heartbeat</b>    ' + (HEARTBEAT_URL ? lastBeat : '(disabled)'));
+
       el.innerHTML = lines.join('\n');
       el.style.display = 'block';
     }
@@ -207,6 +244,7 @@
         video.play().catch(function () {});
       });
       video.addEventListener('error', function () {
+        errorCount++;
         setTimeout(function () { location.reload(); }, 10000);
       });
 
@@ -216,6 +254,7 @@
         });
       }
 
+      lastVideoTime = null; // new media: no baseline to compare against yet
       applyFit(video);
       container.appendChild(video);
     }
@@ -226,6 +265,7 @@
       var img = document.createElement('img');
       img.src = src;
       img.alt = '';
+      img.addEventListener('error', function () { errorCount++; });
       if (DEBUG) {
         img.addEventListener('load', function () {
           noteMediaSize(img.naturalWidth, img.naturalHeight, 'image');
@@ -244,6 +284,10 @@
         return; // No change — leave whatever is currently playing/showing alone.
       }
       current = config;
+      // Media has arrived — make sure the "no media yet" note below can
+      // never be left sitting on top of it.
+      notFoundStreak = 0;
+      document.getElementById('waiting-message').style.display = 'none';
       if (config.type === 'video') {
         renderVideo(config.src);
       } else if (config.type === 'image') {
@@ -253,15 +297,125 @@
       }
     }
 
+    // A screen that has been registered but never saved has no config file
+    // at all, so its first fetch is a plain 404 and the TV shows black with
+    // nothing to explain it — which, on installation day with a ladder and
+    // a remote in hand, is indistinguishable from a wrong URL. Counting
+    // 404s specifically (not network errors, which look identical to a TV
+    // still waiting for wifi at boot) lets that case say what it is.
+    var notFoundStreak = 0;
+
     function checkConfig() {
       fetch(CONFIG_URL + '?_=' + Date.now(), { cache: 'no-store' })
-        .then(function (res) { return res.json(); })
+        .then(function (res) {
+          if (res.status === 404) {
+            notFoundStreak++;
+            // Two in a row, and only while nothing has ever rendered, so a
+            // live screen can never have its media replaced by this note.
+            if (notFoundStreak >= 2 && !current) {
+              document.getElementById('waiting-slug').textContent = SCREEN;
+              document.getElementById('waiting-message').style.display = 'block';
+            }
+            throw new Error('no config file for ' + SCREEN + ' yet');
+          }
+          if (!res.ok) throw new Error('config fetch returned ' + res.status);
+          notFoundStreak = 0;
+          return res.json();
+        })
         .then(applyConfig)
         .catch(function (err) {
           // Network hiccup or bad JSON: keep showing whatever's already on
           // screen rather than blanking it.
+          errorCount++;
           console.log('config check failed', err);
         });
+    }
+
+    // ---- Heartbeat (v6.3.0) ---------------------------------------------
+    // Reports to WordPress what this page is actually doing, so the
+    // dashboard can say "this screen is off" instead of showing a panel that
+    // looks perfectly healthy while the TV behind it is dark.
+    //
+    // It reports health rather than mere liveness, because a plain "I am
+    // alive" would be worse than useless for the failure that actually
+    // happens here: a stuck decoder leaves the page alive and polling while
+    // the picture sits still, so it would report a confident green.
+    //
+    // Nothing here may affect what is on screen. Every failure is swallowed.
+    function videoIsAdvancing() {
+      var v = document.querySelector('#media-container video');
+      if (!v) return false;
+      var t = v.currentTime;
+      if (lastVideoTime === null) {   // first sample: nothing to compare to
+        lastVideoTime = t;
+        return true;
+      }
+      // Compared as a DIFFERENCE, not as "greater than": a looping video
+      // jumps backwards to 0 every cycle, and treating that as "not
+      // advancing" would report a healthy screen as stalled once a loop.
+      var moved = Math.abs(t - lastVideoTime) > 0.05;
+      lastVideoTime = t;
+      return moved;
+    }
+
+    function sendHeartbeat() {
+      if (!SCREEN || !HEARTBEAT_URL) return;
+
+      var isVideo = !!(current && current.type === 'video');
+      var body = JSON.stringify({
+        screen: SCREEN,
+        src: (current && current.src) || '',
+        media_type: (current && current.type) || '',
+        playing: isVideo ? videoIsAdvancing() : true,
+        viewport: window.innerWidth + 'x' + window.innerHeight,
+        dpr: window.devicePixelRatio || 1,
+        uptime: Math.round((Date.now() - LOADED_AT) / 1000),
+        errors: errorCount
+      });
+
+      // Sent as text/plain on purpose. It is a CORS-safelisted content type,
+      // so the browser issues NO preflight — which matters because this is a
+      // cross-origin request from the kiosk domain to WordPress, and a
+      // preflight would double the requests and add one more thing to
+      // misconfigure. WordPress reads the raw body and parses it itself.
+      fetch(HEARTBEAT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: body,
+        cache: 'no-store'
+      }).then(function (res) {
+        lastBeat = res.ok ? 'ok' : ('HTTP ' + res.status);
+      }).catch(function () {
+        lastBeat = 'unreachable';
+      }).then(function () {
+        updateDebug();
+      });
+    }
+
+    // ---- Nightly recycle -------------------------------------------------
+    // Reloads in the small hours to clear a stuck decoder before anyone sees
+    // it. The minute is derived from the slug so the screens don't all
+    // reload in the same second — not that it would matter much, but four
+    // TVs hitting GitHub Pages together is easy to avoid.
+    function jitterMinute() {
+      var h = 0;
+      for (var i = 0; i < (SCREEN || '').length; i++) h = (h * 31 + SCREEN.charCodeAt(i)) % 60;
+      return h;
+    }
+
+    function maybeRecycle() {
+      var upMs = Date.now() - LOADED_AT;
+      if (upMs < MIN_UPTIME_BEFORE_RELOAD_MS) return;   // never thrash after a reload
+
+      if (upMs > MAX_UPTIME_HOURS * 60 * 60 * 1000) {
+        location.reload();
+        return;
+      }
+
+      var now = new Date();
+      if (now.getHours() === RELOAD_HOUR && now.getMinutes() === jitterMinute()) {
+        location.reload();
+      }
     }
 
     // If the app/browser gets backgrounded and comes back, make sure video resumes.
@@ -287,6 +441,11 @@
     } else {
       checkConfig();
       setInterval(checkConfig, CHECK_INTERVAL_MS);
+
+      setTimeout(sendHeartbeat, FIRST_HEARTBEAT_MS);
+      setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+
+      setInterval(maybeRecycle, 60000);
     }
   </script>
 </body>
