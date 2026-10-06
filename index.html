@@ -105,15 +105,18 @@
     // display.
     //
     // Every CHECK_INTERVAL_MS it re-fetches that config (cache-busted) and
-    // swaps the on-screen media if — and only if — the config actually
-    // changed, so a poll that returns the same thing never restarts a video.
+    // swaps the on-screen media if — and only if — what should be showing
+    // actually changed, so a poll that resolves to the same thing never
+    // restarts a video.
     //
     // To change what a screen shows: use the WordPress control panel, which
     // writes the config file. Nothing about this HTML file needs to change,
     // and nothing about it is specific to any one screen.
 
+    var KIOSK_BUILD = 'v6.6.0';
     var CHECK_INTERVAL_MS = 30000;
-    var current = null; // last-applied config, so we don't restart media needlessly
+    var current = null;  // last-APPLIED resolved config, so we don't restart media needlessly
+    var lastRaw = null;  // last config file we successfully fetched, for re-evaluation
 
     // ---- Where this page reports its health (v6.3.0) --------------------
     // WordPress lives on a different host from the kiosk, so this is the one
@@ -157,6 +160,159 @@
     var SCREEN = getScreenSlug();
     var CONFIG_URL = SCREEN ? 'config-' + SCREEN + '.json' : null;
 
+    // =====================================================================
+    // v6.6.0 — the schedule evaluator
+    //
+    // The TV decides what it should be showing, instead of being told. Why
+    // here and not in WordPress: WordPress cannot act on a clock. WP-Cron
+    // fires on page visits, and the site is behind All-In-One Intranet with
+    // no public traffic, so a quiet morning means no visitor, no cron, and a
+    // lunch menu that silently never appears. This page is already awake and
+    // already polling every 30 seconds, so evaluating here is free and
+    // reliable.
+    //
+    // AS OF THIS BUILD IT IS A NO-OP. Every screen is in manual mode, so
+    // resolve() always returns the config's own type/src — byte-identical to
+    // what v6.3.0 did. The code is live and exercised on every poll on every
+    // screen, which is the point: when Phase 4 starts writing rules, the
+    // machinery will already have been running for weeks.
+    //
+    // Config shape it understands (all of it optional; a v6.3.0-era config
+    // with only type/src/fit resolves to exactly itself):
+    //
+    //   mode   "manual" (default) or "scheduled"
+    //   pool   [ { id, type, src }, … ]      the items rules may reference
+    //   rules  [ { item, days?, date?, from?, to?, start?, end? }, … ]
+    //
+    // Precedence, highest first — manual override, then a date-specific
+    // rule, then a weekly recurring rule, then the config's own type/src as
+    // the default. That ordering is from the architecture vision and Phase 4
+    // depends on it.
+    //
+    // THE RULE THIS FILE LIVES BY: resolution must never be able to black a
+    // screen. Anything unparseable, any rule pointing at an item that isn't
+    // in the pool, any thrown exception — all of them fall back to the
+    // config's own type/src, which is always present and always current.
+    // =====================================================================
+
+    // "HH:MM" -> minutes since midnight, or null if it isn't a time.
+    function parseHHMM(value) {
+      if (typeof value !== 'string') return null;
+      var m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
+      if (!m) return null;
+      return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    }
+
+    // Is `minutes` inside [start, end)? A window whose end is not after its
+    // start is taken to cross midnight — 22:00–02:00 means the late evening
+    // AND the small hours. Same reading as the per-area opening hours in the
+    // plugin, deliberately: see the note on duplication below.
+    function inWindow(minutes, start, end) {
+      if (start === null || end === null) return true;   // no window given: all day
+      if (end > start) return minutes >= start && minutes < end;
+      return minutes >= start || minutes < end;          // crosses midnight
+    }
+
+    // "YYYY-MM-DD" for a Date, in LOCAL time. Deliberately not toISOString(),
+    // which converts to UTC and would put a screen on the wrong day's menu
+    // for an hour or two either side of midnight depending on the season.
+    function localDate(d) {
+      var mm = d.getMonth() + 1, dd = d.getDate();
+      return d.getFullYear() + '-' + (mm < 10 ? '0' : '') + mm + '-' + (dd < 10 ? '0' : '') + dd;
+    }
+
+    // Does one rule apply right now? Returns 0 for no, 1 for a weekly match,
+    // 2 for a date match — the number doubling as its precedence tier.
+    //
+    // A rule carrying any date field is a date rule even if it also carries
+    // days: the date is the more specific statement, and that is the whole
+    // reason date overrides exist.
+    function ruleMatches(rule, now) {
+      if (!rule || typeof rule !== 'object') return 0;
+
+      var start = parseHHMM(rule.start);
+      var end   = parseHHMM(rule.end);
+      var mins  = now.getHours() * 60 + now.getMinutes();
+      var today = localDate(now);
+
+      var hasDate = typeof rule.date === 'string' || typeof rule.from === 'string' || typeof rule.to === 'string';
+
+      if (hasDate) {
+        if (typeof rule.date === 'string' && rule.date !== today) return 0;
+        if (typeof rule.from === 'string' && today < rule.from) return 0;
+        if (typeof rule.to === 'string' && today > rule.to) return 0;
+        return inWindow(mins, start, end) ? 2 : 0;
+      }
+
+      if (Object.prototype.toString.call(rule.days) === '[object Array]') {
+        var dow = now.getDay();                 // 0 = Sunday, matching the plugin
+        var yesterday = (dow + 6) % 7;
+        var crosses = start !== null && end !== null && end <= start;
+
+        // A window that crosses midnight belongs to the day it STARTED on.
+        // Saturday 00:30 is still Friday's late-night rule, which is the
+        // same correction the plugin's opening hours needed and the reason
+        // an area that closes after midnight doesn't report a fault for its
+        // last two hours of trading.
+        if (crosses) {
+          if (rule.days.indexOf(dow) !== -1 && mins >= start) return 1;
+          if (rule.days.indexOf(yesterday) !== -1 && mins < end) return 1;
+          return 0;
+        }
+
+        if (rule.days.indexOf(dow) === -1) return 0;
+        return inWindow(mins, start, end) ? 1 : 0;
+      }
+
+      return 0;
+    }
+
+    // Turn a raw config into what should be on screen right now.
+    // Always returns an object with type/src/fit, or null if even the
+    // fallback is unusable (in which case the caller leaves the screen
+    // alone rather than blanking it).
+    function resolveConfig(config, now) {
+      if (!config || typeof config !== 'object') return null;
+
+      var base = null;
+      if (config.type && config.src) {
+        base = { type: config.type, src: config.src, fit: config.fit };
+      }
+
+      try {
+        if (config.mode !== 'scheduled') return base;   // manual, absent, or unrecognised
+        if (Object.prototype.toString.call(config.rules) !== '[object Array]') return base;
+
+        var pool = Object.prototype.toString.call(config.pool) === '[object Array]' ? config.pool : [];
+        var bestTier = 0, best = null;
+
+        for (var i = 0; i < config.rules.length; i++) {
+          var rule = config.rules[i];
+          var tier = ruleMatches(rule, now);
+          if (tier === 0 || tier <= bestTier) continue;  // first match wins within a tier
+
+          var item = null;
+          for (var j = 0; j < pool.length; j++) {
+            if (pool[j] && pool[j].id === rule.item) { item = pool[j]; break; }
+          }
+          // A rule pointing at an item that isn't in the pool is ignored
+          // rather than allowed to resolve to nothing. Phase 4 should stop
+          // this being possible; this page must not depend on that.
+          if (!item || !item.type || !item.src) continue;
+
+          bestTier = tier;
+          best = { type: item.type, src: item.src, fit: config.fit };
+        }
+
+        return best || base;
+      } catch (e) {
+        // An evaluator bug must never take a screen down. Whatever happened,
+        // the config's own type/src is still there and still correct.
+        console.log('schedule evaluation failed, falling back to default media', e);
+        return base;
+      }
+    }
+
     // ---- Diagnostic overlay (&debug=1) ---------------------------------
     // Answers questions that can only be answered on the actual hardware:
     // what resolution the kiosk browser is really drawing at, whether the
@@ -180,6 +336,7 @@
       var o = (screen.orientation && screen.orientation.type) || '(not reported)';
 
       var lines = [
+        '<b>build</b>        ' + KIOSK_BUILD,
         '<b>screen</b>       ' + (SCREEN || '(none)'),
         '<b>viewport</b>     ' + vw + ' x ' + vh + '  CSS px',
         '<b>ratio</b>        ' + ratio(vw, vh),
@@ -188,6 +345,14 @@
         '<b>screen obj</b>   ' + screen.width + ' x ' + screen.height,
         '<b>orientation</b>  ' + o,
       ];
+
+      // v6.6.0 — what the evaluator did. On a manual screen this reads
+      // "manual" and "0 rules", which is the expected and only state until
+      // Phase 4.
+      var mode = (lastRaw && lastRaw.mode) || 'manual';
+      var ruleCount = (lastRaw && Object.prototype.toString.call(lastRaw.rules) === '[object Array]')
+        ? lastRaw.rules.length : 0;
+      lines.push('<b>mode</b>         ' + mode + '   (' + ruleCount + ' rules)');
 
       if (lastMediaSize) {
         lines.push('<b>media</b>        ' + lastMediaSize.w + ' x ' + lastMediaSize.h + '  (' + lastMediaSize.kind + ')');
@@ -215,6 +380,10 @@
       document.title = 'Screen: ' + SCREEN;
     }
 
+    // Compares RESOLVED configs, not raw ones. On a manual screen that is the
+    // same comparison v6.3.0 made; on a scheduled one it is the only one that
+    // works, since the rules can stay identical while the item they select
+    // changes at 11:00.
     function sameConfig(a, b) {
       return !!a && !!b && a.type === b.type && a.src === b.src && a.fit === b.fit;
     }
@@ -276,25 +445,29 @@
     }
 
     function applyConfig(config) {
-      if (!config || !config.type || !config.src) {
+      lastRaw = config;
+
+      var resolved = resolveConfig(config, new Date());
+      if (!resolved || !resolved.type || !resolved.src) {
         console.log('Ignoring invalid config:', config);
         return;
       }
-      if (sameConfig(config, current)) {
+      if (sameConfig(resolved, current)) {
         return; // No change — leave whatever is currently playing/showing alone.
       }
-      current = config;
+      current = resolved;
       // Media has arrived — make sure the "no media yet" note below can
       // never be left sitting on top of it.
       notFoundStreak = 0;
       document.getElementById('waiting-message').style.display = 'none';
-      if (config.type === 'video') {
-        renderVideo(config.src);
-      } else if (config.type === 'image') {
-        renderImage(config.src);
+      if (resolved.type === 'video') {
+        renderVideo(resolved.src);
+      } else if (resolved.type === 'image') {
+        renderImage(resolved.src);
       } else {
-        console.log('Unknown media type:', config.type);
+        console.log('Unknown media type:', resolved.type);
       }
+      updateDebug();
     }
 
     // A screen that has been registered but never saved has no config file
@@ -328,6 +501,13 @@
           // screen rather than blanking it.
           errorCount++;
           console.log('config check failed', err);
+
+          // v6.6.0 — but DO re-evaluate the last config we did get. A rule
+          // boundary passes on the clock, not on a fetch, so a screen whose
+          // wifi is having a bad afternoon must still change menu at 11:00.
+          if (lastRaw) {
+            try { applyConfig(lastRaw); } catch (e) {}
+          }
         });
     }
 
@@ -370,7 +550,15 @@
         viewport: window.innerWidth + 'x' + window.innerHeight,
         dpr: window.devicePixelRatio || 1,
         uptime: Math.round((Date.now() - LOADED_AT) / 1000),
-        errors: errorCount
+        errors: errorCount,
+        // v6.6.0 — which build this TV is running. The plugin clamps the
+        // heartbeat to a whitelist and drops anything it doesn't know, so
+        // this is ignored today. It is sent now on purpose: the same trick
+        // that let mode land a version before the evaluator read it. Once a
+        // later plugin version stores it, the dashboard can finally answer
+        // "is this set still on an old page?" — which has so far only been
+        // answerable by walking to it.
+        build: KIOSK_BUILD
       });
 
       // Sent as text/plain on purpose. It is a CORS-safelisted content type,
