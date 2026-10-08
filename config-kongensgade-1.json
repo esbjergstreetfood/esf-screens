@@ -15,5 +15,29 @@
             "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/soho-mood-video-1.mp4"
         }
     ],
-    "rules": []
+    "rules": [
+        {
+            "item": "item-q4dltlldqi",
+            "days": [
+                0,
+                4,
+                5,
+                6
+            ],
+            "start": "20:00",
+            "end": "04:00"
+        },
+        {
+            "item": "item-f8ebanihf3",
+            "days": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+            ]
+        }
+    ]
 }
