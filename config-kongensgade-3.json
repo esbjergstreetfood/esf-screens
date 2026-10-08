@@ -1,5 +1,44 @@
 {
     "type": "image",
     "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/09\/Menukort-samlet-til-skaerm2-3840x2160-2.jpg",
-    "fit": "cover"
+    "fit": "cover",
+    "mode": "manual",
+    "pool": [
+        {
+            "id": "item-lrs18iejqd",
+            "type": "image",
+            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/09\/Menukort-samlet-til-skaerm2-3840x2160-2.jpg"
+        },
+        {
+            "id": "item-gckjzindza",
+            "type": "video",
+            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/soho-mood-video-3.mp4"
+        }
+    ],
+    "rules": [
+        {
+            "item": "item-lrs18iejqd",
+            "days": [
+                0,
+                3,
+                4,
+                5,
+                6
+            ],
+            "start": "20:00",
+            "end": "04:00"
+        },
+        {
+            "item": "item-lrs18iejqd",
+            "days": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+            ]
+        }
+    ]
 }
