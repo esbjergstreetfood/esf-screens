@@ -1,5 +1,8 @@
 {
     "type": "video",
-    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/09\/sal-bar-baseline-720p.mp4",
-    "fit": "cover"
+    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/pa-esbjerg-street-food-10-08.mp4",
+    "fit": "cover",
+    "mode": "manual",
+    "pool": [],
+    "rules": []
 }
