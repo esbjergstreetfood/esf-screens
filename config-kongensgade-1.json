@@ -2,7 +2,7 @@
     "type": "video",
     "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/09\/reel.mp4",
     "fit": "cover",
-    "mode": "manual",
+    "mode": "scheduled",
     "pool": [
         {
             "id": "item-f8ebanihf3",
