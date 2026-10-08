@@ -2,5 +2,18 @@
     "type": "video",
     "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/STREET-FOOD-Madvideo-til-Skaermen-169-h264-no-audio.mp4",
     "fit": "cover",
-    "mode": "manual"
+    "mode": "manual",
+    "pool": [
+        {
+            "id": "item-f8ebanihf3",
+            "type": "video",
+            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/09\/reel.mp4"
+        },
+        {
+            "id": "item-q4dltlldqi",
+            "type": "video",
+            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/soho-mood-video-1.mp4"
+        }
+    ],
+    "rules": []
 }
