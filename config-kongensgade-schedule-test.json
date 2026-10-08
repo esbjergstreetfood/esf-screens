@@ -15,5 +15,34 @@
             "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/09\/Logo-i-farver.jpg"
         }
     ],
-    "rules": []
+    "rules": [
+        {
+            "item": "item-qmmngafqrb",
+            "days": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+            ],
+            "start": "11:00",
+            "end": "11:05"
+        },
+        {
+            "item": "item-hzbwhth6og",
+            "days": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+            ],
+            "start": "11:05",
+            "end": "11:10"
+        }
+    ]
 }
