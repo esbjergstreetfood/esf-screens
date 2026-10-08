@@ -1,0 +1,14 @@
+{
+    "type": "image",
+    "src": "",
+    "fit": "cover",
+    "mode": "manual",
+    "pool": [
+        {
+            "id": "item-qmmngafqrb",
+            "type": "video",
+            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/STREET-FOOD-Madvideo-til-Skaermen-169-h264-no-audio.mp4"
+        }
+    ],
+    "rules": []
+}
