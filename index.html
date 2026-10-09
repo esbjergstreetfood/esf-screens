@@ -113,7 +113,7 @@
     // writes the config file. Nothing about this HTML file needs to change,
     // and nothing about it is specific to any one screen.
 
-    var KIOSK_BUILD = 'v6.6.0';
+    var KIOSK_BUILD = 'v6.13.0';
     var CHECK_INTERVAL_MS = 30000;
     var current = null;  // last-APPLIED resolved config, so we don't restart media needlessly
     var lastRaw = null;  // last config file we successfully fetched, for re-evaluation
@@ -135,6 +135,35 @@
     var RELOAD_HOUR = 4;                 // local time on the TV
     var MAX_UPTIME_HOURS = 26;           // backstop for a TV whose clock is wrong
     var MIN_UPTIME_BEFORE_RELOAD_MS = 2 * 60 * 60 * 1000;
+
+    // ---- Self-healing (v6.13.0) -----------------------------------------
+    // A stuck decoder leaves this page alive and polling while the picture
+    // sits still. A reload clears it — known, not assumed: Robin cleared one
+    // on 2026-10-06 by changing the TV's URL away and back, which is a full
+    // page teardown. n = 1, so this is built as the first thing to TRY, with
+    // a cap and a fallback to alerting, never as a claimed cure.
+    //
+    // Its own sampler and its own baseline, deliberately. videoIsAdvancing()
+    // mutates lastVideoTime on the heartbeat's 60s cadence; a second caller
+    // sampling on a different interval would corrupt both readings and could
+    // report a healthy screen as stalled.
+    var SELF_HEAL_SAMPLE_MS = 20000;                  // own cadence
+    var SELF_HEAL_STRIKES = 3;                        // ~60s of no progress
+    var SELF_HEAL_MIN_GAP_MS = 60 * 60 * 1000;        // at most one per hour
+    var SELF_HEAL_MIN_UPTIME_MS = 3 * 60 * 1000;      // let a video actually start
+    var SELF_HEAL_WINDOW_MS = 6 * 60 * 60 * 1000;     // what "recently" means when reporting
+
+    var healSample = null;     // own baseline, never shared with the heartbeat
+    var healStrikes = 0;
+    var healHistory = [];      // epoch ms of past self-heals, survives reloads
+
+    // ---- Remote reload (v6.13.0) ----------------------------------------
+    // The dashboard writes reload_after into the config; the TV acts on it
+    // at its next poll. The whole difficulty is that the command must be
+    // IDEMPOTENT — a naive flag reloads every 30 seconds for ever, on four
+    // live screens at once, which is far worse than the fault it fixes.
+    var RELOAD_CMD_MIN_UPTIME_MS = 15000;
+    var RELOAD_CMD_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 
     var LOADED_AT = Date.now();
     var errorCount = 0;                  // media errors + failed config fetches
@@ -447,6 +476,15 @@
     function applyConfig(config) {
       lastRaw = config;
 
+      // v6.13.0 — a reload command is handled before the media, because if
+      // the page is about to be torn down there is no point swapping a
+      // video into it first.
+      if (handleReloadCommand(config, Date.now())) {
+        console.log('remote reload requested from the dashboard');
+        location.reload();
+        return;
+      }
+
       var resolved = resolveConfig(config, new Date());
       if (!resolved || !resolved.type || !resolved.src) {
         console.log('Ignoring invalid config:', config);
@@ -551,6 +589,12 @@
         dpr: window.devicePixelRatio || 1,
         uptime: Math.round((Date.now() - LOADED_AT) / 1000),
         errors: errorCount,
+        // v6.13.0 — how many times this screen has restarted ITSELF
+        // recently. Self-healing deliberately notifies nobody, so without
+        // this number a screen resuscitating itself every twenty minutes
+        // looks perfectly healthy from the dashboard.
+        self_heals: recentHeals(Date.now()),
+        last_heal: Math.round(lastHealAt() / 1000) || 0,
         // v6.6.0 — which build this TV is running. The plugin clamps the
         // heartbeat to a whitelist and drops anything it doesn't know, so
         // this is ignored today. It is sent now on purpose: the same trick
@@ -578,6 +622,115 @@
       }).then(function () {
         updateDebug();
       });
+    }
+
+    // Both features above need state that OUTLIVES a reload — a cap that
+    // resets every time it fires is not a cap, and a command that is
+    // forgotten on reload is acted on again. localStorage is that state.
+    // Every access is wrapped: a kiosk browser with storage disabled must
+    // degrade to something safe, never to a reload loop.
+    function storageGet(key) {
+      try { return window.localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function storageSet(key, value) {
+      try { window.localStorage.setItem(key, value); return true; } catch (e) { return false; }
+    }
+
+    function healKey() { return 'esf_heals_' + SCREEN; }
+
+    function loadHealHistory() {
+      var raw = storageGet(healKey());
+      if (!raw) return [];
+      try {
+        var list = JSON.parse(raw);
+        if (Object.prototype.toString.call(list) !== '[object Array]') return [];
+        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+          var t = Number(list[i]);
+          if (isFinite(t) && t > cutoff && t <= Date.now() + 60000) out.push(t);
+        }
+        return out.slice(-50);
+      } catch (e) { return []; }
+    }
+
+    function recentHeals(now) {
+      var n = 0;
+      for (var i = 0; i < healHistory.length; i++) {
+        if (now - healHistory[i] <= SELF_HEAL_WINDOW_MS) n++;
+      }
+      return n;
+    }
+
+    function lastHealAt() {
+      return healHistory.length ? healHistory[healHistory.length - 1] : 0;
+    }
+
+    // Returns true when a reload should happen. Pure apart from the strike
+    // counter, so it can be tested directly rather than by waiting for a
+    // decoder to freeze — which is not a test anyone can run.
+    function shouldSelfHeal(now, isVideo, currentTime) {
+      if (!isVideo) { healStrikes = 0; healSample = null; return false; }   // an image cannot stall
+      if (now - LOADED_AT < SELF_HEAL_MIN_UPTIME_MS) { healSample = currentTime; return false; }
+
+      if (healSample === null) { healSample = currentTime; return false; }
+
+      var moved = Math.abs(currentTime - healSample) > 0.05;   // a loop jumps backwards: compare as a difference
+      healSample = currentTime;
+      if (moved) { healStrikes = 0; return false; }
+
+      healStrikes++;
+      if (healStrikes < SELF_HEAL_STRIKES) return false;
+
+      // The cap. A video that genuinely cannot play — a bad file, a 404, a
+      // codec the TV refuses — looks exactly like a stall, and without this
+      // it would reload for ever.
+      var last = lastHealAt();
+      if (last && now - last < SELF_HEAL_MIN_GAP_MS) return false;
+
+      return true;
+    }
+
+    function maybeSelfHeal() {
+      var v = document.querySelector('#media-container video');
+      var isVideo = !!(current && current.type === 'video' && v);
+      if (!shouldSelfHeal(Date.now(), isVideo, v ? v.currentTime : 0)) return;
+
+      // Recorded BEFORE reloading, or the reload erases the evidence that it
+      // happened — and a screen that heals itself every twenty minutes is
+      // broken while technically always recovering. This counter is the only
+      // record of a fault class that deliberately never pages anybody.
+      healHistory.push(Date.now());
+      storageSet(healKey(), JSON.stringify(healHistory.slice(-50)));
+      console.log('self-healing: no playback progress, reloading');
+      location.reload();
+    }
+
+    // The command is acted on once, and the test that it was acted on is a
+    // stored VALUE, not a clock: TV clocks here are not to be trusted, and
+    // comparing a server timestamp against a skewed local clock is how this
+    // turns into a boot loop. The clock is used only as a second guard, to
+    // ignore a command older than this page on a first-ever load.
+    function handleReloadCommand(config, now) {
+      var cmd = Number(config && config.reload_after);
+      if (!cmd || !isFinite(cmd) || cmd <= 0) return false;
+
+      var key = 'esf_reload_' + SCREEN;
+      var seen = storageGet(key);
+
+      if (seen !== null) {
+        if (String(cmd) === seen) return false;          // already done this one
+      } else {
+        // No memory: fall back to the clock, and fail SAFE. A command that
+        // looks older than this page, or implausibly far in the future
+        // (which is what a badly wrong TV clock looks like), is ignored.
+        if (cmd * 1000 <= LOADED_AT) return false;
+        if (cmd * 1000 > now + RELOAD_CMD_FUTURE_TOLERANCE_MS) return false;
+      }
+
+      storageSet(key, String(cmd));
+      if (now - LOADED_AT < RELOAD_CMD_MIN_UPTIME_MS) return false;   // not mid-startup
+      return true;
     }
 
     // ---- Nightly recycle -------------------------------------------------
@@ -634,6 +787,9 @@
       setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
 
       setInterval(maybeRecycle, 60000);
+
+      healHistory = loadHealHistory();
+      setInterval(maybeSelfHeal, SELF_HEAL_SAMPLE_MS);
     }
   </script>
 </body>
