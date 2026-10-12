@@ -10,5 +10,18 @@
             "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/Skaerm-til-SoHo.mp4"
         }
     ],
-    "rules": []
+    "rules": [
+        {
+            "item": "item-mqkonchywx",
+            "days": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+            ]
+        }
+    ]
 }
