@@ -113,7 +113,7 @@
     // writes the config file. Nothing about this HTML file needs to change,
     // and nothing about it is specific to any one screen.
 
-    var KIOSK_BUILD = 'v6.13.0';
+    var KIOSK_BUILD = 'v6.14.0';
     var CHECK_INTERVAL_MS = 30000;
     var current = null;  // last-APPLIED resolved config, so we don't restart media needlessly
     var lastRaw = null;  // last config file we successfully fetched, for re-evaluation
@@ -164,6 +164,32 @@
     // live screens at once, which is far worse than the fault it fixes.
     var RELOAD_CMD_MIN_UPTIME_MS = 15000;
     var RELOAD_CMD_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+
+    // ---- Playback quality instrumentation (v6.14.0) ---------------------
+    // A thermometer, not a cure. It changes nothing on any wall and raises
+    // no alert. It exists because of 2026-10-12: a screen was visibly
+    // hitching, pressing reload did nothing, and the dashboard reported it
+    // completely healthy — because the only health signal we had was
+    // videoIsAdvancing(), which asks whether currentTime MOVED. A video
+    // playing at four frames a second moves. Hitching is invisible to it,
+    // by construction.
+    //
+    // Two things get measured, because the two plausible causes leave
+    // different fingerprints:
+    //
+    //   dropped frames   — the decoder is being handed frames and failing
+    //                      to present them. Points at the TV: CPU, the
+    //                      decoder, the file's own profile.
+    //   buffer starvation— playback ran out of data and had to wait. Points
+    //                      at the network: the TV's wifi link, which is the
+    //                      one thing in this system still unmeasured.
+    //
+    // Both are reported over the heartbeat window AND since the media
+    // started, because "it is hitching right now" and "it has hitched all
+    // day" are different questions with different answers.
+    var qualBase = null;     // playback-quality counters at the last beat
+    var waitCount = 0;       // 'waiting' events since this media started
+    var waitBase = 0;        // that counter at the last beat
 
     var LOADED_AT = Date.now();
     var errorCount = 0;                  // media errors + failed config fetches
@@ -392,6 +418,23 @@
         lines.push('<b>media</b>        (waiting for it to load)');
       }
 
+      // v6.14.0 — playback quality, read NON-destructively. This must not
+      // call qualityReport(): that advances the per-window baselines, and
+      // the overlay redraws on resize and on every heartbeat, which would
+      // quietly corrupt the numbers being reported to the dashboard.
+      var dv = document.querySelector('#media-container video');
+      if (dv) {
+        var qline = '(not measurable on this TV)';
+        if (typeof dv.getVideoPlaybackQuality === 'function') {
+          try {
+            var dq = dv.getVideoPlaybackQuality();
+            qline = dq.droppedVideoFrames + ' dropped of ' + dq.totalVideoFrames;
+          } catch (e) { qline = '(unavailable)'; }
+        }
+        lines.push('<b>frames</b>       ' + qline);
+        lines.push('<b>starved</b>      ' + waitCount + ' x since this media started');
+      }
+
       lines.push('<b>uptime</b>       ' + Math.round((Date.now() - LOADED_AT) / 60000) + ' min');
       lines.push('<b>errors</b>       ' + errorCount);
       lines.push('<b>heartbeat</b>    ' + (HEARTBEAT_URL ? lastBeat : '(disabled)'));
@@ -446,6 +489,11 @@
         setTimeout(function () { location.reload(); }, 10000);
       });
 
+      // v6.14.0 — buffer starvation. 'waiting' fires when playback stops
+      // because there is no data, which is exactly the shape a bad wifi
+      // link leaves. Counting only; nothing is done about it here.
+      video.addEventListener('waiting', function () { waitCount++; });
+
       if (DEBUG) {
         video.addEventListener('loadedmetadata', function () {
           noteMediaSize(video.videoWidth, video.videoHeight, 'video');
@@ -453,6 +501,13 @@
       }
 
       lastVideoTime = null; // new media: no baseline to compare against yet
+
+      // New element means new counters. Carrying them across a media swap
+      // would blame this video for the last one's troubles.
+      qualBase = null;
+      waitCount = 0;
+      waitBase = 0;
+
       applyFit(video);
       container.appendChild(video);
     }
@@ -576,11 +631,76 @@
       return moved;
     }
 
+    // v6.14.0 — reads the two quality signals off a video element and
+    // advances the per-window baselines. Returns only the fields it could
+    // actually measure: a field that is ABSENT means "this TV cannot tell
+    // us", which is a different thing from zero, and the plugin keeps them
+    // apart all the way to the panel.
+    function qualityReport(v) {
+      var out = {};
+      if (!v) return out;
+
+      // Seconds of data buffered ahead of the playhead. A healthy stream
+      // sits seconds ahead; at zero, playback is living hand to mouth and
+      // the next hiccup in the link is a visible stutter.
+      try {
+        var b = v.buffered;
+        if (b && b.length) {
+          var t = v.currentTime;
+          var ahead = 0;
+          for (var i = 0; i < b.length; i++) {
+            if (t >= b.start(i) - 0.25 && t <= b.end(i)) {
+              ahead = b.end(i) - t;
+              break;
+            }
+          }
+          out.buffer_s = Math.round(ahead * 10) / 10;
+        }
+      } catch (e) {}
+
+      out.stalls = waitCount - waitBase;
+      out.stalls_total = waitCount;
+      waitBase = waitCount;
+
+      // Dropped frames. Omitted entirely when the browser has no such
+      // instrument — deliberately NOT zero. Reporting a confident 0% on a
+      // screen that is visibly hitching is precisely the failure this
+      // release exists to end, and it would be a worse one than silence.
+      if (typeof v.getVideoPlaybackQuality !== 'function') return out;
+      var q = null;
+      try { q = v.getVideoPlaybackQuality(); } catch (e) { return out; }
+      if (!q) return out;
+
+      var dropped = Number(q.droppedVideoFrames);
+      var total = Number(q.totalVideoFrames);
+      if (!isFinite(dropped) || !isFinite(total)) return out;
+
+      // Both halves of the lifetime figure, so the panel always has a
+      // stable number to show. Without the denominator it could only
+      // display the window rate, which is absent on any quiet beat — and a
+      // reading that blinks in and out is one nobody trusts or checks.
+      out.dropped_total = dropped;
+      out.frames_total = total;
+
+      var base = qualBase;
+      qualBase = { dropped: dropped, total: total };
+      if (!base) return out;              // first beat for this media
+
+      var dd = dropped - base.dropped;
+      var dt = total - base.total;
+      // No new frames in the whole window: there is no rate to report. A 0%
+      // here would read "fine" during a total decoder stall, which is the
+      // loudest possible wrong answer. playing:false already carries it.
+      if (dt <= 0 || dd < 0) return out;
+      out.dropped_pct = Math.round((dd / dt) * 100);
+      return out;
+    }
+
     function sendHeartbeat() {
       if (!SCREEN || !HEARTBEAT_URL) return;
 
       var isVideo = !!(current && current.type === 'video');
-      var body = JSON.stringify({
+      var payload = {
         screen: SCREEN,
         src: (current && current.src) || '',
         media_type: (current && current.type) || '',
@@ -603,7 +723,22 @@
         // "is this set still on an old page?" — which has so far only been
         // answerable by walking to it.
         build: KIOSK_BUILD
-      });
+      };
+
+      // v6.14.0 — merged in rather than inlined above, because which of
+      // these fields exist depends on what this particular TV can measure.
+      // Wrapped: a thermometer must never be able to stop the heartbeat
+      // that carries it.
+      if (isVideo) {
+        try {
+          var q = qualityReport(document.querySelector('#media-container video'));
+          for (var k in q) {
+            if (Object.prototype.hasOwnProperty.call(q, k)) payload[k] = q[k];
+          }
+        } catch (e) {}
+      }
+
+      var body = JSON.stringify(payload);
 
       // Sent as text/plain on purpose. It is a CORS-safelisted content type,
       // so the browser issues NO preflight — which matters because this is a
