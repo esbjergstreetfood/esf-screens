@@ -113,7 +113,7 @@
     // writes the config file. Nothing about this HTML file needs to change,
     // and nothing about it is specific to any one screen.
 
-    var KIOSK_BUILD = 'v6.14.0';
+    var KIOSK_BUILD = 'v6.14.1';
     var CHECK_INTERVAL_MS = 30000;
     var current = null;  // last-APPLIED resolved config, so we don't restart media needlessly
     var lastRaw = null;  // last config file we successfully fetched, for re-evaluation
@@ -187,9 +187,83 @@
     // Both are reported over the heartbeat window AND since the media
     // started, because "it is hitching right now" and "it has hitched all
     // day" are different questions with different answers.
-    var qualBase = null;     // playback-quality counters at the last beat
-    var waitCount = 0;       // 'waiting' events since this media started
-    var waitBase = 0;        // that counter at the last beat
+    //
+    // ---- v6.14.1: why starvation is timed, not counted ------------------
+    // v6.14.0 counted 'waiting' events. That was wrong, and wrong in the
+    // worst available direction — it reported a healthy screen as broken
+    // and blamed the network for it.
+    //
+    // **Chromium fires 'waiting' every time a looping video restarts.**
+    // Measured 2026-10-15 in Chromium, a 2-second clip looping for 24
+    // seconds: 12 'waiting' events, one per loop, 0 dropped frames, buffer
+    // healthy throughout. The SoHo bar screen runs a 6-second clip, so it
+    // reported 4293 "buffer ran dry" events — 7 hours of ordinary looping —
+    // while playing perfectly.
+    //
+    // The two cases are not close together once you time them:
+    //
+    //     loop restart        3-7 ms      0 frames dropped, buffer healthy
+    //     real starvation     219-1389 ms 5.3% dropped, buffer collapsing
+    //
+    // (Second row measured the same day against a deliberately throttled
+    // server: a 910 kbps clip served at ~40 kB/s.)
+    //
+    // So a stall counts only once it has lasted STALL_MIN_MS, which sits
+    // about 35x above the longest benign wait observed. The raw event
+    // count is kept for the debug overlay and deliberately NOT reported —
+    // it measures how many times the video looped, which is not a fault
+    // and must never appear on the dashboard as one again.
+    //
+    // Seconds lost is reported alongside the count, because a count alone
+    // cannot tell a 4 ms hiccup from a 1.4-second freeze. That was the
+    // other half of the mistake.
+    var STALL_MIN_MS = 250;
+
+    var qualBase = null;        // playback-quality counters at the last beat
+    var waitCount = 0;          // RAW 'waiting' events — debug overlay only
+    var stallPending = null;    // when the current wait began, or null
+    var stallCounted = false;   // has the current wait already been counted?
+    var stallCount = 0;         // qualifying stalls since this media started
+    var stallMs = 0;            // total ms lost to them
+    var stallBase = 0;          // stallCount at the last beat
+
+    // Monotonic where available: a TV whose clock is corrected mid-stall
+    // must not be able to invent or erase a freeze.
+    function nowMs() {
+      try {
+        if (window.performance && typeof window.performance.now === 'function') {
+          return window.performance.now();
+        }
+      } catch (e) {}
+      return Date.now();
+    }
+
+    // The wait ended. Count it only if it lasted long enough to be a fault.
+    function endStall() {
+      if (stallPending === null) return;
+      var d = nowMs() - stallPending;
+      if (d >= STALL_MIN_MS) {
+        if (!stallCounted) stallCount++;
+        stallMs += d;
+      }
+      stallPending = null;
+      stallCounted = false;
+    }
+
+    // Still stalled at report time. A freeze that outlasts a heartbeat must
+    // show up in that heartbeat rather than only once it recovers — a
+    // screen frozen for ten minutes would otherwise report nothing at all
+    // for ten minutes. Counted once; the elapsed time is banked and the
+    // clock restarted, so the next beat adds only what is new.
+    function sampleStall() {
+      if (stallPending === null) return;
+      var now = nowMs();
+      var d = now - stallPending;
+      if (d < STALL_MIN_MS) return;
+      if (!stallCounted) { stallCount++; stallCounted = true; }
+      stallMs += d;
+      stallPending = now;
+    }
 
     var LOADED_AT = Date.now();
     var errorCount = 0;                  // media errors + failed config fetches
@@ -432,7 +506,13 @@
           } catch (e) { qline = '(unavailable)'; }
         }
         lines.push('<b>frames</b>       ' + qline);
-        lines.push('<b>starved</b>      ' + waitCount + ' x since this media started');
+        // v6.14.1 — both numbers, labelled for what they are. The raw
+        // count is here and nowhere else: on a looping video it counts
+        // loops, and it is shown only so that "waits high, stalls zero"
+        // is recognisable on the spot as the healthy case.
+        lines.push('<b>stalls</b>       ' + stallCount + ' x over '
+          + (Math.round(stallMs / 100) / 10) + 's  (>' + STALL_MIN_MS + 'ms)');
+        lines.push('<b>raw waits</b>    ' + waitCount + '  (loop restarts count here - not a fault)');
       }
 
       lines.push('<b>uptime</b>       ' + Math.round((Date.now() - LOADED_AT) / 60000) + ' min');
@@ -489,10 +569,19 @@
         setTimeout(function () { location.reload(); }, 10000);
       });
 
-      // v6.14.0 — buffer starvation. 'waiting' fires when playback stops
-      // because there is no data, which is exactly the shape a bad wifi
-      // link leaves. Counting only; nothing is done about it here.
-      video.addEventListener('waiting', function () { waitCount++; });
+      // v6.14.1 — buffer starvation, TIMED. 'waiting' fires both when
+      // playback genuinely runs out of data and every time a looping
+      // video restarts, so the event alone means nothing; only its
+      // duration separates the two. See the note by STALL_MIN_MS.
+      video.addEventListener('waiting', function () {
+        waitCount++;
+        if (stallPending === null) { stallPending = nowMs(); stallCounted = false; }
+      });
+      video.addEventListener('playing', function () { endStall(); });
+      // A seek away ends the wait too, and a loop restart is a seek — so
+      // without this a benign restart could leave a wait open until the
+      // next beat and be banked as a freeze.
+      video.addEventListener('seeked', function () { endStall(); });
 
       if (DEBUG) {
         video.addEventListener('loadedmetadata', function () {
@@ -506,7 +595,11 @@
       // would blame this video for the last one's troubles.
       qualBase = null;
       waitCount = 0;
-      waitBase = 0;
+      stallPending = null;
+      stallCounted = false;
+      stallCount = 0;
+      stallMs = 0;
+      stallBase = 0;
 
       applyFit(video);
       container.appendChild(video);
@@ -658,9 +751,16 @@
         }
       } catch (e) {}
 
-      out.stalls = waitCount - waitBase;
-      out.stalls_total = waitCount;
-      waitBase = waitCount;
+      // v6.14.1 — qualifying stalls and the time they cost, never the raw
+      // event count. `stalled_s` is also the marker a v6.14.1 page is
+      // sending at all: the plugin refuses to believe stall figures
+      // without it, because a screen still on v6.14.0 reports a tally of
+      // loop restarts and would otherwise be read as badly broken.
+      sampleStall();
+      out.stalls = stallCount - stallBase;
+      out.stalls_total = stallCount;
+      out.stalled_s = Math.round(stallMs / 100) / 10;
+      stallBase = stallCount;
 
       // Dropped frames. Omitted entirely when the browser has no such
       // instrument — deliberately NOT zero. Reporting a confident 0% on a
