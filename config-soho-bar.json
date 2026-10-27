@@ -1,6 +1,6 @@
 {
     "type": "video",
-    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/Kopi-af-when-soho-is-closed-.mp4",
+    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/Skaerm-til-SoHo.mp4",
     "fit": "cover",
     "mode": "scheduled",
     "pool": [
@@ -8,11 +8,6 @@
             "id": "item-mqkonchywx",
             "type": "video",
             "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/Skaerm-til-SoHo.mp4"
-        },
-        {
-            "id": "item-yfked16kpw",
-            "type": "video",
-            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/Kopi-af-when-soho-is-closed-.mp4"
         },
         {
             "id": "item-ppypxwbmy2",
