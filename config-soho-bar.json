@@ -1,8 +1,8 @@
 {
     "type": "video",
-    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/Kopi-af-when-soho-is-closed-12.mp4",
+    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/Kopi-af-when-soho-is-closed-2.mp4",
     "fit": "cover",
-    "mode": "scheduled",
+    "mode": "manual",
     "pool": [
         {
             "id": "item-mqkonchywx",
