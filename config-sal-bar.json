@@ -19,11 +19,21 @@
         {
             "item": "item-dtv206kh6j",
             "start": "18:00",
-            "end": "02:00",
+            "end": "21:00",
             "date": "2026-10-30"
         },
         {
-            "item": "item-ksjpcgebpf",
+            "item": "item-dtv206kh6j",
+            "days": [
+                1,
+                2,
+                3,
+                4,
+                5
+            ]
+        },
+        {
+            "item": "item-6c1lvg5cql",
             "days": [
                 0,
                 1,
