@@ -28,14 +28,10 @@
             "date": "2026-10-30"
         },
         {
-            "item": "item-dtv206kh6j",
-            "days": [
-                1,
-                2,
-                3,
-                4,
-                5
-            ]
+            "item": "item-fjifvtbpvc",
+            "start": "21:00",
+            "end": "05:00",
+            "date": "2026-10-30"
         },
         {
             "item": "item-6c1lvg5cql",
