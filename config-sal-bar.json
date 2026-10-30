@@ -15,5 +15,22 @@
             "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/90er_00er_fest_TV_1920x1080_v2.png"
         }
     ],
-    "rules": []
+    "rules": [
+        {
+            "item": "item-ksjpcgebpf",
+            "date": "2026-10-30"
+        },
+        {
+            "item": "item-ksjpcgebpf",
+            "days": [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+            ]
+        }
+    ]
 }
