@@ -113,7 +113,7 @@
     // writes the config file. Nothing about this HTML file needs to change,
     // and nothing about it is specific to any one screen.
 
-    var KIOSK_BUILD = 'v6.14.1';
+    var KIOSK_BUILD = 'v6.19.0';
     var CHECK_INTERVAL_MS = 30000;
     var current = null;  // last-APPLIED resolved config, so we don't restart media needlessly
     var lastRaw = null;  // last config file we successfully fetched, for re-evaluation
@@ -124,6 +124,12 @@
     // Change it here if the site ever moves. Set it to '' to turn reporting
     // off entirely — the page displays exactly the same either way.
     var HEARTBEAT_URL = 'https://intranet.esbjergstreetfood.com/wp-json/esf-screens/v1/heartbeat';
+    // v6.19.0 — the same check-in also goes to the screens receiver on
+    // Simply, which the office server reads (server move, phase 2). Two
+    // independent sends: WordPress keeps doing everything it does today, and
+    // a receiver that is down or slow can never stop the WordPress check-in,
+    // nor the other way round. Set it to '' to stop only this second send.
+    var RECEIVER_URL = 'https://screens.esbjergstreetfood.com/heartbeat';
     var HEARTBEAT_INTERVAL_MS = 60000;   // deliberately slower than the config poll
     var FIRST_HEARTBEAT_MS = 5000;       // report in promptly after a reload
 
@@ -269,6 +275,7 @@
     var errorCount = 0;                  // media errors + failed config fetches
     var lastVideoTime = null;            // for detecting a stalled decoder
     var lastBeat = '(none yet)';
+    var lastBeatReceiver = '(none yet)';  // v6.19.0 — the second destination
 
     // Read the screen slug from the URL. Both ?s=<slug> and the longer
     // ?screen=<slug> work; ?s= is what goes on the TVs, because the URL
@@ -518,6 +525,7 @@
       lines.push('<b>uptime</b>       ' + Math.round((Date.now() - LOADED_AT) / 60000) + ' min');
       lines.push('<b>errors</b>       ' + errorCount);
       lines.push('<b>heartbeat</b>    ' + (HEARTBEAT_URL ? lastBeat : '(disabled)'));
+      lines.push('<b>receiver</b>     ' + (RECEIVER_URL ? lastBeatReceiver : '(disabled)'));
 
       el.innerHTML = lines.join('\n');
       el.style.display = 'block';
@@ -796,8 +804,28 @@
       return out;
     }
 
+    // v6.19.0 — one send to one destination. Everything that can fail is
+    // inside its own promise chain and its own try, so one destination
+    // failing — even throwing synchronously — cannot reach the other.
+    function postBeat(url, body, done) {
+      try {
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: body,
+          cache: 'no-store'
+        }).then(function (res) {
+          done(res.ok ? 'ok' : ('HTTP ' + res.status));
+        }).catch(function () {
+          done('unreachable');
+        });
+      } catch (e) {
+        done('unreachable');
+      }
+    }
+
     function sendHeartbeat() {
-      if (!SCREEN || !HEARTBEAT_URL) return;
+      if (!SCREEN || (!HEARTBEAT_URL && !RECEIVER_URL)) return;
 
       var isVideo = !!(current && current.type === 'video');
       var payload = {
@@ -845,18 +873,19 @@
       // cross-origin request from the kiosk domain to WordPress, and a
       // preflight would double the requests and add one more thing to
       // misconfigure. WordPress reads the raw body and parses it itself.
-      fetch(HEARTBEAT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-        body: body,
-        cache: 'no-store'
-      }).then(function (res) {
-        lastBeat = res.ok ? 'ok' : ('HTTP ' + res.status);
-      }).catch(function () {
-        lastBeat = 'unreachable';
-      }).then(function () {
-        updateDebug();
-      });
+      // The receiver does the same. Both get the identical body.
+      if (HEARTBEAT_URL) {
+        postBeat(HEARTBEAT_URL, body, function (result) {
+          lastBeat = result;
+          try { updateDebug(); } catch (e) {}
+        });
+      }
+      if (RECEIVER_URL) {
+        postBeat(RECEIVER_URL, body, function (result) {
+          lastBeatReceiver = result;
+          try { updateDebug(); } catch (e) {}
+        });
+      }
     }
 
     // Both features above need state that OUTLIVES a reload — a cap that
