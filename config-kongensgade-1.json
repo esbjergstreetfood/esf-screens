@@ -1,18 +1,18 @@
 {
     "type": "video",
-    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/STREET-FOOD-Madvideo-til-Skaermen-169-h264-no-audio.mp4",
+    "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261105-096770f73d25-street-food-madvideo-til-skaermen-169-h264-no-audio.mp4",
     "fit": "cover",
     "mode": "scheduled",
     "pool": [
         {
             "id": "item-q4dltlldqi",
             "type": "video",
-            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/soho-mood-video-1.mp4"
+            "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261105-aa33ae5e7efb-soho-mood-video-1.mp4"
         },
         {
             "id": "item-dnvuwgmqlt",
             "type": "video",
-            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/10\/STREET-FOOD-Madvideo-til-Skaermen-169-h264-no-audio.mp4"
+            "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261105-096770f73d25-street-food-madvideo-til-skaermen-169-h264-no-audio.mp4"
         }
     ],
     "rules": [
