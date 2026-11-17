@@ -5,11 +5,6 @@
     "mode": "scheduled",
     "pool": [
         {
-            "id": "item-vfhoqpx0wh",
-            "type": "video",
-            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/11\/Storsalen-Event-Video-pa-esbjerg-street-food-11-16.mp4"
-        },
-        {
             "id": "item-1gtogpgzxw",
             "type": "video",
             "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/11\/Storsalen-Event-Video-pa-esbjerg-street-food-11-17.mp4"
