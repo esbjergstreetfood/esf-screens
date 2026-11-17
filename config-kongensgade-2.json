@@ -1,6 +1,6 @@
 {
     "type": "image",
-    "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261105-8f9f891c7d47-menukort-samlet-til-skaerm-3840x2160-2.jpg",
+    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/11\/Screen-2-No-GC-Events-1.jpg",
     "fit": "cover",
     "mode": "scheduled",
     "pool": [
@@ -33,7 +33,7 @@
             "end": "04:00"
         },
         {
-            "item": "item-abh3hwpue7",
+            "item": "item-g69gb6nqld",
             "days": [
                 0,
                 1,
