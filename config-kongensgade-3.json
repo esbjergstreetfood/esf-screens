@@ -1,6 +1,6 @@
 {
     "type": "image",
-    "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261105-a6749c9db103-menukort-samlet-til-skaerm2-3840x2160-2.jpg",
+    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/11\/Screen-3-No-Yogo-TAW.jpg",
     "fit": "cover",
     "mode": "scheduled",
     "pool": [
@@ -33,7 +33,7 @@
             "end": "04:00"
         },
         {
-            "item": "item-lrs18iejqd",
+            "item": "item-jy1t9tchvc",
             "days": [
                 0,
                 1,
