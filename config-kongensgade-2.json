@@ -1,6 +1,6 @@
 {
     "type": "image",
-    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/11\/Screen-2-No-GC-Events-1.jpg",
+    "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261117-86ec531a5e0c-screen-2-no-gc-events-1.jpg",
     "fit": "cover",
     "mode": "scheduled",
     "pool": [
@@ -17,7 +17,7 @@
         {
             "id": "item-g69gb6nqld",
             "type": "image",
-            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/11\/Screen-2-No-GC-Events-1.jpg"
+            "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261117-86ec531a5e0c-screen-2-no-gc-events-1.jpg"
         }
     ],
     "rules": [
