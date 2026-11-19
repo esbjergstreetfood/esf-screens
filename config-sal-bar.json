@@ -1,13 +1,13 @@
 {
     "type": "video",
-    "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/11\/Storsalen-Event-Video-pa-esbjerg-street-food_20261117_132821_0000.mp4",
+    "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261117-4f08967af4f0-storsalen-event-video-pa-esbjerg-street-food-20261117-132821.mp4",
     "fit": "cover",
     "mode": "scheduled",
     "pool": [
         {
             "id": "item-5zfre3lmv6",
             "type": "video",
-            "src": "https:\/\/intranet.esbjergstreetfood.com\/wp-content\/uploads\/2026\/11\/Storsalen-Event-Video-pa-esbjerg-street-food_20261117_132821_0000.mp4"
+            "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261117-4f08967af4f0-storsalen-event-video-pa-esbjerg-street-food-20261117-132821.mp4"
         }
     ],
     "rules": [
