@@ -1,6 +1,6 @@
 {
     "type": "video",
-    "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261120-3b471621f64d-storsalen-event-video-pa-esbjerg-street-food-11-20.mp4",
+    "src": "https:\/\/screens.esbjergstreetfood.com\/media\/20261123-a2c9770b6e55-storsalen-event-video-pa-esbjerg-street-food-11-23.mp4",
     "fit": "cover",
     "mode": "scheduled",
     "pool": [
@@ -17,7 +17,7 @@
     ],
     "rules": [
         {
-            "item": "item-byzft7eal0",
+            "item": "item-ix2g9bg752",
             "days": [
                 0,
                 1,
