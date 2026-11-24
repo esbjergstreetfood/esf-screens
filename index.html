@@ -113,7 +113,7 @@
     // writes the config file. Nothing about this HTML file needs to change,
     // and nothing about it is specific to any one screen.
 
-    var KIOSK_BUILD = 'v6.19.0';
+    var KIOSK_BUILD = 'v6.22.0';
     var CHECK_INTERVAL_MS = 30000;
     var current = null;  // last-APPLIED resolved config, so we don't restart media needlessly
     var lastRaw = null;  // last config file we successfully fetched, for re-evaluation
@@ -162,6 +162,25 @@
     var healSample = null;     // own baseline, never shared with the heartbeat
     var healStrikes = 0;
     var healHistory = [];      // epoch ms of past self-heals, survives reloads
+
+    // ---- Viewport self-heal (v6.22.0, server-move plan A2) --------------
+    // Seen 2026-11-20, Kongensgade 4: the TV was switched on and the page
+    // came up at 0x0, then 960x540 (dpr 2) instead of 1920x1080 — it started
+    // before the TV settled into its 4K mode. The page laid out for the wrong
+    // size, never looked again, and the screen was black until a reload.
+    // So: watch the viewport; if it is not the panel's size for two minutes
+    // (from load, or from the last time it changed), reload. A wrong size
+    // that corrects itself through a resize needs nothing.
+    // 1080x1920 is Screenlite's rotation setting: a reload cannot fix it.
+    var VIEWPORT_W = 1920;
+    var VIEWPORT_H = 1080;
+    var VIEWPORT_WRONG_MS = 2 * 60 * 1000;            // how long wrong before a reload
+    var VIEWPORT_CHECK_MS = 10000;                    // own timer; resize/orientation also look
+    var VIEWPORT_MIN_GAP_MS = 60 * 60 * 1000;         // at most one per hour
+    var VIEWPORT_WINDOW_MS = 6 * 60 * 60 * 1000;      // what "recently" means when reporting
+
+    var viewState = null;           // {w, h, since}: size now, and when (performance.now) it became that
+    var viewHealHistory = [];       // epoch ms of past viewport reloads, survives reloads
 
     // ---- Remote reload (v6.13.0) ----------------------------------------
     // The dashboard writes reload_after into the config; the TV acts on it
@@ -841,7 +860,12 @@
         // recently. Self-healing deliberately notifies nobody, so without
         // this number a screen resuscitating itself every twenty minutes
         // looks perfectly healthy from the dashboard.
-        self_heals: recentHeals(Date.now()),
+        // v6.22.0 — viewport reloads are counted in self_heals, so the
+        // repeated-heal alert covers a set that keeps coming up wrong-sized.
+        // (The receiver keeps only fields it knows, so there is no separate
+        // count: the panel tells the two apart from the viewport the set was
+        // reporting just before the reload.)
+        self_heals: recentHeals(Date.now()) + recentViewportHeals(Date.now()),
         last_heal: Math.round(lastHealAt() / 1000) || 0,
         // v6.6.0 — which build this TV is running. The plugin clamps the
         // heartbeat to a whitelist and drops anything it doesn't know, so
@@ -970,6 +994,82 @@
       location.reload();
     }
 
+    function viewportKey() { return 'esf_vheals_' + SCREEN; }
+
+    function loadViewportHeals() {
+      var raw = storageGet(viewportKey());
+      if (!raw) return [];
+      try {
+        var list = JSON.parse(raw);
+        if (Object.prototype.toString.call(list) !== '[object Array]') return [];
+        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+          var t = Number(list[i]);
+          if (isFinite(t) && t > cutoff && t <= Date.now() + 60000) out.push(t);
+        }
+        return out.slice(-50);
+      } catch (e) { return []; }
+    }
+
+    function recentViewportHeals(now) {
+      var n = 0;
+      for (var i = 0; i < viewHealHistory.length; i++) {
+        if (now - viewHealHistory[i] <= VIEWPORT_WINDOW_MS) n++;
+      }
+      return n;
+    }
+
+    // Decides whether the viewport has been wrong long enough to reload.
+    //   st        {w, h, since} from the last call, or null on the first
+    //   perfNow   performance.now(): elapsed time is only ever measured on
+    //             this monotonic clock, so a wrong TV clock cannot start or
+    //             suppress the two minutes
+    //   lastHeal  epoch ms of the last viewport reload, 0 if none; the only
+    //             wall-clock use, for the hourly cap, and refused both ways:
+    //             a stamp in the future (clock went backwards) holds the cap
+    //             too, because the safe side here is NOT reloading
+    //   wallNow   epoch ms
+    // Returns {st, reload}. Pure, so it can be tested without a TV.
+    function viewportDecision(st, perfNow, w, h, lastHeal, wallNow) {
+      var changed = !st || st.w !== w || st.h !== h;
+      var next = changed ? { w: w, h: h, since: perfNow } : st;
+      if (changed) return { st: next, reload: false, changed: true };
+      if (w === VIEWPORT_W && h === VIEWPORT_H) return { st: next, reload: false, changed: false };
+      if (w === VIEWPORT_H && h === VIEWPORT_W) return { st: next, reload: false, changed: false };   // rotated: not a reload's to fix
+      if (perfNow - next.since < VIEWPORT_WRONG_MS) return { st: next, reload: false, changed: false };
+      if (lastHeal && Math.abs(wallNow - lastHeal) < VIEWPORT_MIN_GAP_MS) return { st: next, reload: false, changed: false };
+      return { st: next, reload: true, changed: false };
+    }
+
+    function lastViewportHealAt() {
+      return viewHealHistory.length ? viewHealHistory[viewHealHistory.length - 1] : 0;
+    }
+
+    // The page's own handler. A resize means the layout may not follow the new
+    // size, so the media is drawn again — only to a real size, never 0x0.
+    function checkViewport() {
+      var w = window.innerWidth, h = window.innerHeight;
+      var r = viewportDecision(viewState, performance.now(), w, h, lastViewportHealAt(), Date.now());
+      viewState = r.st;
+      if (r.changed) {
+        try { updateDebug(); } catch (e) {}
+        if (w > 0 && h > 0 && current) {
+          if (current.type === 'video') renderVideo(current.src);
+          else if (current.type === 'image') renderImage(current.src);
+        }
+        return;
+      }
+      if (!r.reload) return;
+      // Recorded BEFORE reloading, and a reload that cannot be recorded does
+      // not happen: with storage disabled there is no cap, and no cap means
+      // a loop.
+      viewHealHistory.push(Date.now());
+      if (!storageSet(viewportKey(), JSON.stringify(viewHealHistory.slice(-50)))) { viewHealHistory.pop(); return; }
+      console.log('viewport self-heal: ' + w + 'x' + h + ' for 2 min, reloading');
+      location.reload();
+    }
+
     // The command is acted on once, and the test that it was acted on is a
     // stored VALUE, not a clock: TV clocks here are not to be trusted, and
     // comparing a server timestamp against a skewed local clock is how this
@@ -1054,6 +1154,14 @@
 
       healHistory = loadHealHistory();
       setInterval(maybeSelfHeal, SELF_HEAL_SAMPLE_MS);
+
+      viewHealHistory = loadViewportHeals();
+      checkViewport();   // the starting size, stamped at load
+      setInterval(checkViewport, VIEWPORT_CHECK_MS);
+      window.addEventListener('resize', checkViewport);
+      if (screen.orientation && screen.orientation.addEventListener) {
+        screen.orientation.addEventListener('change', checkViewport);
+      }
     }
   </script>
 </body>
